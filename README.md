@@ -164,6 +164,53 @@ PoB codes are URL-safe base64 of zlib-compressed XML. The decoder handles both P
 
 Logs are prefixed with `[faq]`. Set `DEBUG=1` for full gateway output.
 
+## Admin web interface
+
+The bot includes a web-based admin interface for managing config, channels, and settings.
+
+### Running locally
+
+The admin interface starts automatically with the bot on port 3001 (configurable via `ADMIN_PORT`).
+
+```bash
+npm run dev  # bot + admin interface on http://localhost:3001
+```
+
+### Discord OAuth login
+
+The admin interface uses Discord OAuth2 for authentication. Only users with **Administrator** or **Manage Server** permissions in a guild where the bot is installed can log in.
+
+Required env vars:
+- `CLIENT_ID` — Discord application ID
+- `CLIENT_SECRET` — Discord OAuth2 client secret (Developer Portal → OAuth2 → Reset Secret)
+- `ADMIN_CALLBACK_URL` — OAuth2 callback URL (default: `http://localhost:3001/auth/callback`)
+
+### Hosting on bot.zephex.dk
+
+1. **DNS**: Point `bot.zephex.dk` A record to your server IP
+
+2. **Add Caddy config**: Add this block to `/etc/caddy/Caddyfile`:
+
+```
+bot.zephex.dk {
+    reverse_proxy 127.0.0.1:3001
+}
+```
+
+3. **Reload Caddy**: `sudo caddy reload --config /etc/caddy/Caddyfile` or `sudo systemctl restart caddy`
+
+4. **Set env vars**:
+```env
+ADMIN_PORT=3001
+ADMIN_CALLBACK_URL=https://bot.zephex.dk/auth/callback
+```
+
+5. **Discord OAuth redirect**: Add `https://bot.zephex.dk/auth/callback` to Developer Portal → OAuth2 → Redirects
+
+6. **Access**: https://bot.zephex.dk/login
+
+The admin interface is currently accessible at http://85.190.126.152:3001 (port 3001 is open).
+
 ## Layout
 
 ```
@@ -172,6 +219,8 @@ src/config.ts     loads and validates the config
 src/matcher.ts    normalisation, word boundaries, priority, regex triggers
 src/targets.ts    turns a target into a jump URL (pins are cached)
 src/pob.ts       PoB share code decoder (base64 + zlib) + XML parser
+src/poeLinks.ts  PoE build link detection (pobb.in, poedb.tw, maxroll, etc.)
+src/admin.ts     admin web interface with Discord OAuth
 src/index.ts      gateway wiring, replies, /faq and /pob commands
 src/tools.ts      `npm run ids` / `npm run pins` helpers
 src/check.ts      `npm run check` — validates every target resolves
