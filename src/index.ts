@@ -277,10 +277,10 @@ function extractPobCode(text: string): string | null {
 async function handlePoeLinksInMessage(message: Message, links: PoeLink[]): Promise<void> {
   for (const link of links) {
     // Try to fetch and decode a PoB code from the link
-    const xml = await fetchPobCodeFromUrl(link);
-    if (xml) {
+    const fetched = await fetchPobCodeFromUrl(link);
+    if (fetched) {
       try {
-        const summary = parsePobSummary(xml);
+        const summary = parsePobSummary(fetched.xml);
         const embed = new EmbedBuilder()
           .setColor(toColor(config.settings.embedColor))
           .setTitle(`${summary.className ?? "PoE Build"}${summary.ascendancy ? ` — ${summary.ascendancy}` : ""}`)
@@ -296,6 +296,12 @@ async function handlePoeLinksInMessage(message: Message, links: PoeLink[]): Prom
 
         if (summary.notes) {
           embed.addFields({ name: "Notes", value: summary.notes.slice(0, 300), inline: false });
+        }
+
+        const pobbinUrl = await uploadToPobbin(fetched.code);
+        if (pobbinUrl) {
+          embed.setURL(pobbinUrl);
+          embed.addFields({ name: "pobb.in", value: pobbinUrl, inline: false });
         }
 
         await message.reply({ embeds: [embed], allowedMentions: { repliedUser: false } });

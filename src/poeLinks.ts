@@ -1,11 +1,19 @@
-import { fetchAndDecode, parseUrl } from "pob-parser";
+import { fetchAndDecode, parseUrl, decode } from "pob-parser";
+import { looksLikePobCode } from "./pob.js";
 
-export type PoeLinkType = "pobb.in" | "poedb.tw" | "pob.codes" | "maxroll" | "poe.ninja" | "unknown";
+export type PoeLinkType = "pobb.in" | "poedb.tw" | "pob.codes" | "pastebin" | "maxroll" | "poe.ninja" | "unknown";
 
 export interface PoeLink {
   url: string;
   type: PoeLinkType;
 }
+
+export interface FetchedPobCode {
+  code: string;
+  xml: string;
+}
+
+const USER_AGENT = "ArcaneSurge-Discord-Bot/1.0 (contact: discord ArcaneSurge)";
 
 /**
  * Detect PoE-related links in a message.
@@ -14,12 +22,11 @@ export function extractPoeLinks(text: string): PoeLink[] {
   const links: PoeLink[] = [];
   const seen = new Set<string>();
 
-  // URL regex
   const urlRegex = /https?:\/\/[^\s<>"]+/gi;
   let match: RegExpExecArray | null;
 
   while ((match = urlRegex.exec(text)) !== null) {
-    const url = match[0].replace(/[.,;:!?)]+$/, ""); // strip trailing punctuation
+    const url = match[0].replace(/[.,;:!?)]+$/, "");
     if (seen.has(url)) continue;
     seen.add(url);
 
@@ -37,37 +44,48 @@ function classifyUrl(url: string): PoeLinkType | null {
   if (lower.includes("pobb.in")) return "pobb.in";
   if (lower.includes("poedb.tw") || lower.includes("poe2db.tw")) return "poedb.tw";
   if (lower.includes("pob.codes")) return "pob.codes";
+  if (lower.includes("pastebin.com")) return "pastebin";
   if (lower.includes("maxroll.gg")) return "maxroll";
   if (lower.includes("poe.ninja")) return "poe.ninja";
   return null;
 }
 
 /**
- * Try to fetch and decode a PoB code from a URL.
- * Returns the decoded XML or null if it can't be fetched/decoded.
+ * Fetch the raw PoB share code behind a link and decode it.
+ * Returns the code (for re-uploading) and the decoded XML, or null.
  */
-export async function fetchPobCodeFromUrl(link: PoeLink): Promise<string | null> {
+export async function fetchPobCodeFromUrl(link: PoeLink): Promise<FetchedPobCode | null> {
   try {
     switch (link.type) {
       case "pobb.in": {
         const parsed = parseUrl(link.url);
         if (!parsed) return null;
-        return await fetchAndDecode(parsed.rawUrl);
+        const response = await fetch(parsed.rawUrl, { headers: { "User-Agent": USER_AGENT } });
+        if (!response.ok) return null;
+        const code = (await response.text()).trim();
+        return { code, xml: await decode(code) };
       }
       case "poedb.tw": {
-        // Extract ID from URL: poedb.tw/pob/:id or poedb.tw/us/pob/:id
         const idMatch = link.url.match(/\/pob\/([a-zA-Z0-9_-]+)/);
         if (!idMatch) return null;
-        const id = idMatch[1];
-        const response = await fetch(`https://poedb.tw/pob/${id}/raw`, {
-          headers: { "User-Agent": "ArcaneSurge-Discord-Bot/1.0 (contact: bot@arcane-surge)" },
+        const response = await fetch(`https://poedb.tw/pob/${idMatch[1]}/raw`, {
+          headers: { "User-Agent": USER_AGENT },
         });
         if (!response.ok) return null;
-        const code = await response.text();
-        if (!code || code.length < 10) return null;
-        // Decode using pob-parser
-        const { decode } = await import("pob-parser");
-        return await decode(code.trim());
+        const code = (await response.text()).trim();
+        if (code.length < 10) return null;
+        return { code, xml: await decode(code) };
+      }
+      case "pastebin": {
+        const idMatch = new URL(link.url).pathname.match(/^\/([A-Za-z0-9]{6,})$/);
+        if (!idMatch) return null;
+        const response = await fetch(`https://pastebin.com/raw/${idMatch[1]}`, {
+          headers: { "User-Agent": USER_AGENT },
+        });
+        if (!response.ok) return null;
+        const code = (await response.text()).trim();
+        if (!looksLikePobCode(code)) return null;
+        return { code, xml: await decode(code) };
       }
       default:
         return null;
@@ -85,8 +103,11 @@ export function linkTypeName(type: PoeLinkType): string {
     case "pobb.in": return "pobb.in";
     case "poedb.tw": return "poedb.tw";
     case "pob.codes": return "pob.codes";
+    case "pastebin": return "Pastebin";
     case "maxroll": return "Maxroll";
     case "poe.ninja": return "poe.ninja";
     default: return "PoE site";
   }
 }
+
+export { fetchAndDecode };
