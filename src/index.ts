@@ -236,8 +236,39 @@ async function handlePobCommand(interaction: Interaction): Promise<void> {
     if (summary.level) {
       fields.push({ name: "Level", value: String(summary.level), inline: true });
     }
+    if (summary.ascendancy && summary.ascendancy !== "None") {
+      // Already in title
+    }
+    if (summary.stats.life) {
+      fields.push({ name: "Life", value: String(summary.stats.life), inline: true });
+    }
+    if (summary.stats.energyShield) {
+      fields.push({ name: "ES", value: String(summary.stats.energyShield), inline: true });
+    }
+    if (summary.stats.mana) {
+      fields.push({ name: "Mana", value: String(summary.stats.mana), inline: true });
+    }
+    if (summary.stats.dps) {
+      fields.push({ name: "DPS", value: String(summary.stats.dps), inline: true });
+    }
+    if (summary.stats.fireRes !== undefined || summary.stats.coldRes !== undefined || summary.stats.lightningRes !== undefined || summary.stats.chaosRes !== undefined) {
+      const res = [
+        summary.stats.fireRes !== undefined ? `F:${summary.stats.fireRes}%` : "",
+        summary.stats.coldRes !== undefined ? `C:${summary.stats.coldRes}%` : "",
+        summary.stats.lightningRes !== undefined ? `L:${summary.stats.lightningRes}%` : "",
+        summary.stats.chaosRes !== undefined ? `Ch:${summary.stats.chaosRes}%` : "",
+      ].filter(Boolean).join(" ");
+      if (res) fields.push({ name: "Resistances", value: res, inline: false });
+    }
     if (summary.skills.length > 1) {
       fields.push({ name: "Skills", value: summary.skills.join(", "), inline: false });
+    }
+    if (summary.items.length > 0) {
+      const gear = summary.items.map((i) => `${i.slot}: ${i.name} (${i.rarity})`).join("\\n");
+      fields.push({ name: "Gear", value: gear.slice(0, 1024), inline: false });
+    }
+    if (summary.passivePoints) {
+      fields.push({ name: "Passive Points", value: String(summary.passivePoints), inline: true });
     }
 
     const embed = new EmbedBuilder()
@@ -248,6 +279,12 @@ async function handlePobCommand(interaction: Interaction): Promise<void> {
 
     if (summary.notes) {
       embed.addFields({ name: "Notes", value: summary.notes.slice(0, 500), inline: false });
+    }
+
+    const pobbinUrl = await uploadToPobbin(code);
+    if (pobbinUrl) {
+      embed.setURL(pobbinUrl);
+      embed.addFields({ name: "pobb.in", value: pobbinUrl, inline: false });
     }
 
     embed.setFooter({ text: "Decoded from a Path of Building share code" });
@@ -353,8 +390,14 @@ async function handlePobCodeInMessage(message: Message, code: string): Promise<v
       .addFields(
         { name: "Game", value: summary.game, inline: true },
         ...(summary.level ? [{ name: "Level", value: String(summary.level), inline: true }] : []),
+        ...(summary.stats.life ? [{ name: "Life", value: String(summary.stats.life), inline: true }] : []),
+        ...(summary.stats.energyShield ? [{ name: "ES", value: String(summary.stats.energyShield), inline: true }] : []),
+        ...(summary.stats.dps ? [{ name: "DPS", value: String(summary.stats.dps), inline: true }] : []),
         ...(summary.skills.length > 1
           ? [{ name: "Skills", value: summary.skills.slice(0, 5).join(", "), inline: false }]
+          : []),
+        ...(summary.items.length > 0
+          ? [{ name: "Gear", value: summary.items.slice(0, 6).map((i) => `${i.slot}: ${i.name}`).join("\\n"), inline: false }]
           : []),
       )
       .setFooter({ text: "Auto-detected from a Path of Building share code" });

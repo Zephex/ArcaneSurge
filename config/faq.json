@@ -4,16 +4,69 @@
     "replyMentions": false,
     "cooldownSeconds": 10,
     "ignoreBots": true,
-    "messageChannels": [],
-    "codeChannels": [],
-    "commandChannels": []
+    "messageChannels": [
+      "1536285374840569950",
+      "1536286327425990717",
+      "1536286403275526155",
+      "1536287016738619443",
+      "1536317701797187635",
+      "1536326644447576064",
+      "1546946783144312932",
+      "1570431915775885412",
+      "1573828017137127607",
+      "1574867691377000628"
+    ],
+    "codeChannels": [
+      "349206543150874626",
+      "1103033280707694682",
+      "1254208185703731250",
+      "1536285374840569950",
+      "1536286327425990717",
+      "1570431915775885412",
+      "1573828017137127607",
+      "1574867691377000628"
+    ],
+    "commandChannels": [
+      "349206543150874626",
+      "1103033280707694682",
+      "1254208185703731250",
+      "1536285374840569950",
+      "1536286327425990717",
+      "1570431915775885412",
+      "1573828017137127607",
+      "1574867691377000628"
+    ],
+    "linkChannels": [
+      "349206543150874626",
+      "1103033280707694682",
+      "1254208185703731250",
+      "1536285374840569950",
+      "1536286327425990717",
+      "1570431915775885412",
+      "1573828017137127607",
+      "1574867691377000628"
+    ],
+    "features": {
+      "faq": true,
+      "pobCodes": true,
+      "poeLinks": true,
+      "commands": true
+    }
   },
   "entries": [
     {
       "id": "faq-forum",
       "label": "FAQ forum",
-      "triggers": ["faq", "frequently asked", "where is the faq", "search first"],
-      "target": { "type": "thread", "channelId": "1573828017137127607" },
+      "triggers": [
+        "faq",
+        "frequently asked",
+        "where is the faq",
+        "search first"
+      ],
+      "target": {
+        "type": "thread",
+        "channelId": "1573828017137127607"
+      },
       "message": "Browse the FAQ forum — check the existing posts first, then open a new one if yours isn't there.",
       "color": "#5865F2"
     },
@@ -26,7 +79,10 @@
         "crown crafting",
         "archdemon crown crafting"
       ],
-      "target": { "type": "thread", "channelId": "1574183318810009680" },
+      "target": {
+        "type": "thread",
+        "channelId": "1574183318810009680"
+      },
       "message": "There's already a troubleshooting post for the Archdemon Crown — add your question there.",
       "color": "#57F287"
     },
@@ -42,7 +98,10 @@
         "share code",
         "build code"
       ],
-      "target": { "type": "thread", "channelId": "1573828017137127607" },
+      "target": {
+        "type": "thread",
+        "channelId": "1573828017137127607"
+      },
       "message": "Path of Building is the community build planner. Paste your share code with `/pob <code>` and the bot will decode it. More info is in the FAQ forum.",
       "color": "#5865F2"
     },
@@ -59,7 +118,10 @@
         "craft of exile",
         "pob fork"
       ],
-      "target": { "type": "thread", "channelId": "1573828017137127607" },
+      "target": {
+        "type": "thread",
+        "channelId": "1573828017137127607"
+      },
       "message": "Common PoE tools: Path of Building, poe.ninja, the official trade site, craftofexile.com. Check the FAQ forum for setup guides.",
       "color": "#5865F2"
     }

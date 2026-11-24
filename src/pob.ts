@@ -52,11 +52,163 @@ export async function uploadToPobbin(code: string): Promise<string | null> {
   }
 }
 
+/** Parse equipped items from the active item set. */
+function parseItems(xml: string): PobItem[] {
+  const items: PobItem[] = [];
+
+  // Find the active item set (first one with id="1" or the one marked active)
+  // PoB typically has multiple ItemSets; use the one with the highest id or "Endgame"
+  const itemSetRegex = /<ItemSet[^>]*title="([^"]*)"[^>]*id="([^"]*)"[^>]*>([\s\S]*?)<\/ItemSet>/gi;
+  const itemSets: { title: string; id: string; content: string }[] = [];
+  let setMatch: RegExpExecArray | null;
+  while ((setMatch = itemSetRegex.exec(xml)) !== null) {
+    itemSets.push({ title: setMatch[1] ?? "", id: setMatch[2] ?? "", content: setMatch[3] ?? "" });
+  }
+
+  // Prefer "Endgame" or highest id
+  let activeSet = itemSets.find((s) => s.title.toLowerCase().includes("endgame"));
+  if (!activeSet && itemSets.length > 0) {
+    activeSet = itemSets[itemSets.length - 1];
+  }
+  if (!activeSet) return items;
+
+  // Build item id -> item text map
+  const itemMap = new Map<string, string>();
+  const itemRegex = /<Item id="(\d+)"[^>]*>([\s\S]*?)<\/Item>/gi;
+  let itemMatch: RegExpExecArray | null;
+  while ((itemMatch = itemRegex.exec(xml)) !== null) {
+    itemMap.set(itemMatch[1] ?? "", (itemMatch[2] ?? "").trim());
+  }
+
+  // Parse slots
+  const slotRegex = /<Slot[^>]*name="([^"]*)"[^>]*itemId="(\d+)"[^>]*>/gi;
+  let slotMatch: RegExpExecArray | null;
+  while ((slotMatch = slotRegex.exec(activeSet.content)) !== null) {
+    const slot = slotMatch[1] ?? "";
+    const itemId = slotMatch[2] ?? "";
+    if (itemId === "0") continue; // Empty slot
+
+    const itemText = itemMap.get(itemId);
+    if (!itemText) continue;
+
+    // Parse item text
+    const lines = itemText.split("\n").map((l) => l.trim()).filter(Boolean);
+    let rarity = "NORMAL";
+    let name = "";
+    let baseType = "";
+
+    for (const line of lines) {
+      if (line.startsWith("Rarity:")) {
+        rarity = line.replace("Rarity:", "").trim().toUpperCase();
+      } else if (!name && line && !line.includes(":") && !line.startsWith("{")) {
+        // First non-rarity, non-property line is the name
+        if (!name) name = line;
+        else if (!baseType) baseType = line;
+      }
+    }
+
+    // If name is "New Item", try to get from base type
+    if (name === "New Item" || !name) {
+      // Look for base type in the item text
+      const baseMatch = itemText.match(/Rarity:.*\n(?:New Item\n)?(.+)/);
+      if (baseMatch) {
+        const candidate = (baseMatch[1] ?? "").trim();
+        if (candidate && !candidate.includes(":")) {
+          name = candidate;
+        }
+      }
+    }
+
+    // Simplify: use first two non-empty lines after Rarity as name/base
+    const itemLines = itemText.split("\n").map((l) => l.trim()).filter(Boolean);
+    let idx = 0;
+    if ((itemLines[idx] ?? "").startsWith("Rarity:")) idx++;
+    if (itemLines[idx] === "New Item") idx++;
+    if (idx < itemLines.length && !(itemLines[idx] ?? "").includes(":")) {
+      name = itemLines[idx] ?? "";
+      idx++;
+    }
+    if (idx < itemLines.length && !(itemLines[idx] ?? "").includes(":") && !(itemLines[idx] ?? "").startsWith("{")) {
+      baseType = itemLines[idx] ?? "";
+    }
+
+    if (name || baseType) {
+      // Decode HTML entities
+      const decode = (s: string) => s.replace(/&apos;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+      items.push({
+        slot,
+        name: decode(name || baseType || "Unknown"),
+        baseType: decode(baseType || name || "Unknown"),
+        rarity,
+      });
+    }
+  }
+
+  return items;
+}
+
+/** Parse key stats from PlayerStat elements. */
+function parseStats(xml: string): PobSummary["stats"] {
+  const stats: PobSummary["stats"] = {};
+  const statMap: Record<string, keyof PobSummary["stats"]> = {
+    Life: "life",
+    EnergyShield: "energyShield",
+    Mana: "mana",
+    CombinedDPS: "dps",
+    TotalDPS: "dps",
+    FireResist: "fireRes",
+    ColdResist: "coldRes",
+    LightningResist: "lightningRes",
+    ChaosResist: "chaosRes",
+  };
+
+  for (const [statName, key] of Object.entries(statMap)) {
+    const re = new RegExp(`<PlayerStat stat="${statName}" value="([^"]*)"`, "i");
+    const m = xml.match(re);
+    if (m && m[1]) {
+      const val = Number(m[1]);
+      if (!isNaN(val) && val > 0) {
+        // Don't overwrite dps if already set by CombinedDPS
+        if (key === "dps" && stats.dps !== undefined && statName === "TotalDPS") continue;
+        (stats as any)[key] = val;
+      }
+    }
+  }
+
+  return stats;
+}
+
+/** Parse passive points from the active spec. */
+function parsePassivePoints(xml: string): number | undefined {
+  // Find the last spec (highest level) and count nodes
+  const specRegex = /<Spec\s[^>]*>/gi;
+  const specs: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = specRegex.exec(xml)) !== null) {
+    specs.push(m[0]);
+  }
+  if (specs.length === 0) return undefined;
+
+  const lastSpec = specs[specs.length - 1] ?? "";
+  const nodesMatch = lastSpec.match(/nodes="([^"]*)"/);
+  if (!nodesMatch || !nodesMatch[1]) return undefined;
+
+  const nodes = (nodesMatch[1] ?? "").split(",").filter((n) => n.trim().length > 0);
+  return nodes.length;
+}
+
 /** Extract a single attribute value from an XML tag. */
 function attr(tag: string, name: string): string | undefined {
   const re = new RegExp(`\\b${name}="([^"]*)"`, "i");
   const m = tag.match(re);
   return m ? m[1] : undefined;
+}
+
+export interface PobItem {
+  slot: string;
+  name: string;
+  baseType: string;
+  rarity: string;
 }
 
 export interface PobSummary {
@@ -74,6 +226,21 @@ export interface PobSummary {
   skills: string[];
   /** Build notes if present */
   notes?: string;
+  /** Equipped items (from the active item set) */
+  items: PobItem[];
+  /** Key stats */
+  stats: {
+    life?: number;
+    energyShield?: number;
+    mana?: number;
+    dps?: number;
+    fireRes?: number;
+    coldRes?: number;
+    lightningRes?: number;
+    chaosRes?: number;
+  };
+  /** Number of passive points allocated */
+  passivePoints?: number;
 }
 
 /**
@@ -124,6 +291,15 @@ export function parsePobSummary(xml: string): PobSummary {
     || xml.match(/<Notes>([\s\S]*?)<\/Notes>/i);
   const notes = notesMatch ? (notesMatch[1] ?? "").trim() : undefined;
 
+  // Extract items from the active item set
+  const items = parseItems(xml);
+
+  // Extract key stats
+  const stats = parseStats(xml);
+
+  // Extract passive points from the active spec
+  const passivePoints = parsePassivePoints(xml);
+
   return {
     game,
     className,
@@ -132,6 +308,9 @@ export function parsePobSummary(xml: string): PobSummary {
     mainSkill,
     skills: skills.slice(0, 10), // Limit to first 10
     notes: notes && notes.length > 0 ? notes.slice(0, 500) : undefined,
+    items,
+    stats,
+    passivePoints,
   };
 }
 
