@@ -241,7 +241,8 @@ async function handlePobCommand(interaction: Interaction): Promise<void> {
     await reply({
       content: `❌ Could not decode the PoB code: ${(error as Error).message}\n\n` +
         "Make sure you copied the full code from PoB's **Share → Copy build code** button. " +
-        "The code is a long string of letters and numbers.",
+        "The code is a long string of letters and numbers.\n\n" +
+        "💡 If the code is too long for this command, just paste it as a regular message or attach it as a .txt file — the bot will auto-detect it.",
     });
   }
 }
@@ -288,32 +289,68 @@ async function handlePobCodeInMessage(message: Message, code: string): Promise<v
   }
 }
 
+/** Check message attachments for PoB codes (Discord converts long pastes to .txt files). */
+async function extractPobCodeFromAttachments(message: Message): Promise<string | null> {
+  if (!message.attachments || message.attachments.size === 0) return null;
+
+  for (const attachment of message.attachments.values()) {
+    // Only check text files
+    const name = attachment.name?.toLowerCase() ?? "";
+    if (!name.endsWith(".txt") && !name.endsWith(".pob") && !attachment.contentType?.startsWith("text/")) {
+      continue;
+    }
+
+    try {
+      const response = await fetch(attachment.url);
+      if (!response.ok) continue;
+      const content = await response.text();
+      const trimmed = content.trim();
+      if (trimmed.length >= 50 && looksLikePobCode(trimmed)) {
+        return trimmed;
+      }
+    } catch {
+      // Ignore fetch errors
+    }
+  }
+
+  return null;
+}
+
 async function handleMessage(message: Message): Promise<void> {
-  if (!message.guild || !message.content) return;
+  if (!message.guild) return;
   if (config.settings.ignoreBots && message.author.bot) return;
 
   const allowlist = config.settings.channelAllowlist;
   if (allowlist.length > 0 && !allowlist.includes(message.channelId)) return;
 
-  // Check for PoB codes in the message
-  const pobCode = extractPobCode(message.content);
-  if (pobCode) {
-    await handlePobCodeInMessage(message, pobCode);
+  // Check message attachments for PoB codes (Discord converts long pastes to .txt files)
+  const pobCodeFromAttachment = await extractPobCodeFromAttachments(message);
+  if (pobCodeFromAttachment) {
+    await handlePobCodeInMessage(message, pobCodeFromAttachment);
     return;
   }
 
-  const match = findMatch(triggers, message.content);
-  if (!match) return;
-  if (match.entry.channelIds && !match.entry.channelIds.includes(message.channelId)) return;
+  // Check message content for PoB codes
+  if (message.content) {
+    const pobCode = extractPobCode(message.content);
+    if (pobCode) {
+      await handlePobCodeInMessage(message, pobCode);
+      return;
+    }
 
-  const now = Date.now();
-  if (now - (cooldowns.get(message.author.id) ?? 0) < config.settings.cooldownSeconds * 1000) {
-    return;
+    const match = findMatch(triggers, message.content);
+    if (!match) return;
+    if (match.entry.channelIds && !match.entry.channelIds.includes(message.channelId)) return;
+
+    const now = Date.now();
+    if (now - (cooldowns.get(message.author.id) ?? 0) < config.settings.cooldownSeconds * 1000) {
+      return;
+    }
+    cooldowns.set(message.author.id, now);
+
+    const reply: FaqReply = (payload) => message.reply(payload);
+    await replyWithFaq(reply, match, message.guild.id);
   }
-  cooldowns.set(message.author.id, now);
-
-  const reply: FaqReply = (payload) => message.reply(payload);
-  await replyWithFaq(reply, match, message.guild.id);
 }
 
 client.once(Events.ClientReady, (ready) => {
