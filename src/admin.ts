@@ -358,7 +358,10 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
     .btn-logout { background: #4f545c; }
     input, textarea, select { background: #0f3460; color: #e0e0e0; border: 1px solid #2a2a4a; padding: 8px; border-radius: 4px; width: 100%; margin: 5px 0; font-family: inherit; }
     textarea { min-height: 100px; font-family: monospace; }
-    select[multiple] { min-height: 320px; }
+    .checklist { background: #0f3460; border-radius: 4px; padding: 8px; margin: 5px 0 10px; }
+    .checklist h5 { color: #7289da; font-size: 12px; margin: 8px 0 2px; text-transform: uppercase; }
+    .checklist label { display: block; font-size: 14px; padding: 2px 0; cursor: pointer; }
+    .checklist input[type=checkbox] { width: auto; margin: 0 6px 0 0; }
     .guild-block { border: 1px solid #2a2a4a; border-radius: 6px; padding: 12px; margin: 12px 0; }
     .guild-block h4 { color: #57F287; margin-bottom: 4px; }
     .hint { color: #a0a0a0; font-size: 13px; margin: 6px 0; }
@@ -401,7 +404,7 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
       <label><input type="checkbox" id="feat-commands"> Slash commands (/faq, /pob)</label>
 
       <h3>Channels</h3>
-      <p class="hint">Each server has its own pickers. Hold Ctrl (Cmd on Mac) to select several. A feature only works in the channels selected across all servers. Leave every box empty to allow all channels.</p>
+      <p class="hint">Each server has its own list. Tick the channels a feature may use. A feature only works in the channels selected across all servers. Leave every box empty to allow all channels.</p>
       <div id="channel-pickers"></div>
 
       <h3>Other</h3>
@@ -484,10 +487,9 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
           const chosen = (config && config.settings[key]) || [];
           const label = document.createElement('label');
           label.textContent = CHANNEL_LABELS[key];
-          const sel = document.createElement('select');
-          sel.multiple = true;
-          sel.size = 14;
-          sel.dataset.key = key;
+          const list = document.createElement('div');
+          list.className = 'checklist';
+          list.dataset.key = key;
 
           const groups = {};
           for (const ch of guild.channels) {
@@ -495,27 +497,31 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
             (groups[cat] = groups[cat] || []).push(ch);
           }
           for (const cat of Object.keys(groups)) {
-            const group = document.createElement('optgroup');
-            group.label = cat;
+            const heading = document.createElement('h5');
+            heading.textContent = cat;
+            list.appendChild(heading);
             for (const ch of groups[cat]) {
-              const opt = document.createElement('option');
-              opt.value = ch.id;
-              opt.textContent = '#' + ch.name;
-              opt.selected = chosen.includes(ch.id);
-              group.appendChild(opt);
+              const row = document.createElement('label');
+              const box = document.createElement('input');
+              box.type = 'checkbox';
+              box.value = ch.id;
+              box.dataset.key = key;
+              box.checked = chosen.includes(ch.id);
+              row.appendChild(box);
+              row.appendChild(document.createTextNode('#' + ch.name));
+              list.appendChild(row);
             }
-            sel.appendChild(group);
           }
           block.appendChild(label);
-          block.appendChild(sel);
+          block.appendChild(list);
         }
         container.appendChild(block);
       }
     }
 
     function selectedIds(key) {
-      return Array.from(document.querySelectorAll('select[data-key="' + key + '"]'))
-        .flatMap(sel => Array.from(sel.selectedOptions).map(o => o.value));
+      return Array.from(document.querySelectorAll('input[type=checkbox][data-key="' + key + '"]:checked'))
+        .map(box => box.value);
     }
 
     async function saveSettings() {
