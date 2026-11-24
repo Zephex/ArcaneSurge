@@ -4,7 +4,9 @@
     "replyMentions": false,
     "cooldownSeconds": 10,
     "ignoreBots": true,
-    "channelAllowlist": []
+    "messageChannels": [],
+    "codeChannels": [],
+    "commandChannels": []
   },
   "entries": [
     {

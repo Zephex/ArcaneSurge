@@ -17,6 +17,7 @@ import { type CompiledTrigger, compileTriggers, findMatch } from "./matcher.js";
 import { resolveTarget } from "./targets.js";
 import { decodePobCode, looksLikePobCode, parsePobSummary, type PobSummary } from "./pob.js";
 import { extractPoeLinks, fetchPobCodeFromUrl, linkTypeName, type PoeLink } from "./poeLinks.js";
+import "./admin.js"; // Start admin web interface
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -159,6 +160,13 @@ async function replyWithFaq(
 
 async function handleCommand(interaction: Interaction): Promise<void> {
   if (!interaction.isChatInputCommand()) return;
+
+  // Check command channel allowlist
+  const cmdChannels = config.settings.commandChannels;
+  if (cmdChannels.length > 0 && interaction.channelId && !cmdChannels.includes(interaction.channelId)) {
+    await interaction.reply({ content: "Commands are not enabled in this channel.", ephemeral: true });
+    return;
+  }
 
   if (interaction.commandName === "faq") {
     await handleFaqCommand(interaction);
@@ -376,28 +384,41 @@ async function handleMessage(message: Message): Promise<void> {
   if (!message.guild) return;
   if (config.settings.ignoreBots && message.author.bot) return;
 
-  const allowlist = config.settings.channelAllowlist;
-  if (allowlist.length > 0 && !allowlist.includes(message.channelId)) return;
-
-  // Check message attachments for PoB codes (Discord converts long pastes to .txt files)
-  const pobCodeFromAttachment = await extractPobCodeFromAttachments(message);
-  if (pobCodeFromAttachment) {
-    await handlePobCodeInMessage(message, pobCodeFromAttachment);
-    return;
+  const allowlist = config.settings.messageChannels;
+  if (allowlist.length > 0 && !allowlist.includes(message.channelId)) {
+    // Still allow PoB code detection and PoE link handling in non-allowlisted channels
+    // if codeChannels or commandChannels include this channel
   }
 
-  // Check message content for PoB codes
-  if (message.content) {
-    const pobCode = extractPobCode(message.content);
-    if (pobCode) {
-      await handlePobCodeInMessage(message, pobCode);
+  // Check message attachments for PoB codes (Discord converts long pastes to .txt files)
+  const codeChannels = config.settings.codeChannels;
+  const codeAllowed = codeChannels.length === 0 || codeChannels.includes(message.channelId);
+  if (codeAllowed) {
+    const pobCodeFromAttachment = await extractPobCodeFromAttachments(message);
+    if (pobCodeFromAttachment) {
+      await handlePobCodeInMessage(message, pobCodeFromAttachment);
       return;
     }
+  }
 
-    // Check for PoE-related links (pobb.in, poedb.tw, maxroll, poe.ninja, pob.codes)
-    const poeLinks = extractPoeLinks(message.content);
-    if (poeLinks.length > 0) {
-      await handlePoeLinksInMessage(message, poeLinks);
+  if (message.content) {
+    if (codeAllowed) {
+      const pobCode = extractPobCode(message.content);
+      if (pobCode) {
+        await handlePobCodeInMessage(message, pobCode);
+        return;
+      }
+
+      const poeLinks = extractPoeLinks(message.content);
+      if (poeLinks.length > 0) {
+        await handlePoeLinksInMessage(message, poeLinks);
+        return;
+      }
+    }
+
+    // FAQ keyword triggers — only in messageChannels (or all if empty)
+    const msgChannels = config.settings.messageChannels;
+    if (msgChannels.length > 0 && !msgChannels.includes(message.channelId)) {
       return;
     }
 
@@ -421,11 +442,9 @@ client.once(Events.ClientReady, (ready) => {
   console.log(
     `[faq] ${config.entries.length} entries, ${triggers.length} triggers, ` +
       `cooldown ${config.settings.cooldownSeconds}s, ` +
-      `allowlist ${
-        config.settings.channelAllowlist.length > 0
-          ? `${config.settings.channelAllowlist.length} channel(s)`
-          : "off (listening everywhere)"
-      }`,
+      `msg channels: ${config.settings.messageChannels.length > 0 ? config.settings.messageChannels.length : "all"}, ` +
+      `code channels: ${config.settings.codeChannels.length > 0 ? config.settings.codeChannels.length : "all"}, ` +
+      `cmd channels: ${config.settings.commandChannels.length > 0 ? config.settings.commandChannels.length : "all"}`,
   );
 
   // Set the bot's presence/activity

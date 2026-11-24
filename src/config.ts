@@ -33,8 +33,12 @@ export interface Settings {
   cooldownSeconds: number;
   /** Ignore messages from other bots (prevents reply loops). */
   ignoreBots: boolean;
-  /** If non-empty, the bot only listens in these channels. */
-  channelAllowlist: string[];
+  /** If non-empty, the bot only listens for FAQ keyword triggers in these channels. */
+  messageChannels: string[];
+  /** If non-empty, the bot only detects PoB codes in these channels. */
+  codeChannels: string[];
+  /** If non-empty, slash commands only work in these channels. */
+  commandChannels: string[];
 }
 
 export interface FaqConfig {
@@ -47,7 +51,9 @@ const DEFAULT_SETTINGS: Settings = {
   replyMentions: false,
   cooldownSeconds: 10,
   ignoreBots: true,
-  channelAllowlist: [],
+  messageChannels: [],
+  codeChannels: [],
+  commandChannels: [],
 };
 
 export class ConfigError extends Error {
@@ -194,11 +200,23 @@ function validateSettings(raw: unknown): Settings {
     }
     settings.cooldownSeconds = source.cooldownSeconds;
   }
-  if (source.channelAllowlist !== undefined) {
-    const ids = asStringArray(source.channelAllowlist, `${where}.channelAllowlist`);
+  if (source.messageChannels !== undefined) {
+    const ids = asStringArray(source.messageChannels, `${where}.messageChannels`);
     const bad = ids.find((id) => !isSnowflake(id));
-    if (bad !== undefined) fail(`${where}.channelAllowlist`, `"${bad}" is not a channel ID`);
-    settings.channelAllowlist = ids;
+    if (bad !== undefined) fail(`${where}.messageChannels`, `"${bad}" is not a channel ID`);
+    settings.messageChannels = ids;
+  }
+  if (source.codeChannels !== undefined) {
+    const ids = asStringArray(source.codeChannels, `${where}.codeChannels`);
+    const bad = ids.find((id) => !isSnowflake(id));
+    if (bad !== undefined) fail(`${where}.codeChannels`, `"${bad}" is not a channel ID`);
+    settings.codeChannels = ids;
+  }
+  if (source.commandChannels !== undefined) {
+    const ids = asStringArray(source.commandChannels, `${where}.commandChannels`);
+    const bad = ids.find((id) => !isSnowflake(id));
+    if (bad !== undefined) fail(`${where}.commandChannels`, `"${bad}" is not a channel ID`);
+    settings.commandChannels = ids;
   }
 
   const unknown = Object.keys(source).filter(
