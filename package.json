@@ -1,0 +1,26 @@
+{
+  "name": "discord-faq-bot",
+  "version": "1.0.0",
+  "description": "Keyword-triggered FAQ bot that points users at pinned messages, forum posts, or docs",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "tsx src/selftest.ts",
+    "ids": "tsx src/tools.ts ids",
+    "pins": "tsx src/tools.ts pins"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

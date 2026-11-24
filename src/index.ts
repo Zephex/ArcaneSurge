@@ -1,0 +1,253 @@
+import "dotenv/config";
+import {
+  Client,
+  EmbedBuilder,
+  Events,
+  GatewayIntentBits,
+  MessageFlags,
+  Partials,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+  type Interaction,
+  type Message,
+} from "discord.js";
+import { type FaqConfig, loadConfig } from "./config.js";
+import { type CompiledTrigger, compileTriggers, findMatch } from "./matcher.js";
+import { resolveTarget } from "./targets.js";
+
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    console.error(`${name} is not set. Copy .env.example to .env and fill it in.`);
+    process.exit(1);
+  }
+  return value;
+}
+
+const token = requireEnv("DISCORD_TOKEN");
+
+// MessageContent is a privileged intent: it must also be switched on in the
+// Developer Portal, otherwise the gateway closes with 4014 on connect.
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+  partials: [Partials.Channel],
+});
+
+// Assigned during startup, before the gateway connects, so every handler below
+// can read them without null checks.
+let config!: FaqConfig;
+let triggers!: CompiledTrigger[];
+
+const cooldowns = new Map<string, number>();
+
+function printIntentHelp(): void {
+  console.error(`
+The gateway refused a privileged intent. Enable it:
+
+  1. https://discord.com/developers/applications -> your application
+  2. Bot -> Privileged Gateway Intents
+  3. Switch on "Message Content Intent"
+  4. Restart the bot
+
+Without it the bot connects, but every message arrives with empty content,
+so nothing will ever match.
+`);
+}
+
+const FAQ_COMMAND = new SlashCommandBuilder()
+  .setName("faq")
+  .setDescription("Look up a frequently asked question")
+  .addStringOption((option) =>
+    option
+      .setName("query")
+      .setDescription("Your question — leave blank to list every topic"),
+  )
+  .toJSON();
+
+async function registerCommands(): Promise<void> {
+  const clientId = process.env.CLIENT_ID ?? client.user?.id;
+  if (!clientId) {
+    console.warn("[faq] CLIENT_ID is not set; skipping slash command registration.");
+    return;
+  }
+
+  const guildId = process.env.GUILD_ID;
+  const route = guildId
+    ? Routes.applicationGuildCommands(clientId, guildId)
+    : Routes.applicationCommands(clientId);
+
+  await new REST().setToken(token).put(route, { body: [FAQ_COMMAND] });
+  console.log(
+    `[faq] registered /faq ${
+      guildId ? `to guild ${guildId} (appears instantly)` : "globally (may take up to an hour)"
+    }`,
+  );
+}
+
+/** "#5865F2" -> 0x5865F2. Config validation guarantees the format. */
+function toColor(hex: string): number {
+  return Number.parseInt(hex.slice(1), 16);
+}
+
+function buildEmbed(entry: FaqConfig["entries"][number], url: string): EmbedBuilder {
+  return new EmbedBuilder()
+    .setColor(toColor(entry.color ?? config.settings.embedColor))
+    .setTitle(entry.label)
+    .setDescription(entry.message)
+    .setURL(url);
+}
+
+/** Shared shape so one helper can reply to both messages and interactions. */
+interface FaqReplyPayload {
+  content?: string;
+  embeds?: EmbedBuilder[];
+  allowedMentions?: { repliedUser?: boolean };
+}
+type FaqReply = (payload: FaqReplyPayload) => Promise<unknown>;
+
+async function replyWithFaq(
+  reply: FaqReply,
+  match: { entry: FaqConfig["entries"][number]; trigger: string },
+  guildId: string | null,
+): Promise<void> {
+  const { entry, trigger } = match;
+  const allowedMentions = { repliedUser: config.settings.replyMentions };
+
+  let url: string | null = null;
+  let failure: unknown = null;
+  try {
+    if (!guildId) throw new Error("cannot resolve a target outside a guild");
+    url = await resolveTarget(client, guildId, entry.target);
+  } catch (error) {
+    failure = error;
+  }
+
+  if (url === null) {
+    // Answer anyway rather than leaving the asker hanging, but log loudly —
+    // a broken target is a config problem, not something to hide.
+    console.error(`[faq] entry "${entry.id}" could not resolve its target:`, failure);
+    await reply({ content: entry.message, allowedMentions });
+    return;
+  }
+
+  const embed = buildEmbed(entry, url).setFooter({ text: `Matched "${trigger}"` });
+  await reply({ embeds: [embed], allowedMentions });
+}
+
+async function handleCommand(interaction: Interaction): Promise<void> {
+  if (!interaction.isChatInputCommand() || interaction.commandName !== "faq") return;
+
+  // Acknowledge straight away: resolving a pin is a REST call, and Discord
+  // gives us only 3 seconds before the interaction times out.
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const reply: FaqReply = (payload) => interaction.editReply(payload);
+
+  const query = interaction.options.getString("query");
+
+  if (!query) {
+    const topics = config.entries.map((entry) => `\`${entry.id}\` — ${entry.label}`).join("\n");
+    await reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(toColor(config.settings.embedColor))
+          .setTitle("FAQ topics")
+          .setDescription(topics || "No entries configured yet.")
+          .setFooter({ text: "Use /faq query:<your question> to test a phrase" }),
+      ],
+    });
+    return;
+  }
+
+  const match = findMatch(triggers, query);
+  if (!match) {
+    await reply({ content: `Nothing in the FAQ matches **${query}**.` });
+    return;
+  }
+
+  await replyWithFaq(reply, match, interaction.guildId);
+}
+
+async function handleMessage(message: Message): Promise<void> {
+  if (!message.guild || !message.content) return;
+  if (config.settings.ignoreBots && message.author.bot) return;
+
+  const allowlist = config.settings.channelAllowlist;
+  if (allowlist.length > 0 && !allowlist.includes(message.channelId)) return;
+
+  const match = findMatch(triggers, message.content);
+  if (!match) return;
+  if (match.entry.channelIds && !match.entry.channelIds.includes(message.channelId)) return;
+
+  const now = Date.now();
+  if (now - (cooldowns.get(message.author.id) ?? 0) < config.settings.cooldownSeconds * 1000) {
+    return;
+  }
+  cooldowns.set(message.author.id, now);
+
+  const reply: FaqReply = (payload) => message.reply(payload);
+  await replyWithFaq(reply, match, message.guild.id);
+}
+
+client.once(Events.ClientReady, (ready) => {
+  console.log(`[faq] logged in as ${ready.user.tag}`);
+  console.log(
+    `[faq] ${config.entries.length} entries, ${triggers.length} triggers, ` +
+      `cooldown ${config.settings.cooldownSeconds}s, ` +
+      `allowlist ${
+        config.settings.channelAllowlist.length > 0
+          ? `${config.settings.channelAllowlist.length} channel(s)`
+          : "off (listening everywhere)"
+      }`,
+  );
+
+  void registerCommands().catch((error) => {
+    console.error("[faq] failed to register slash commands:", error);
+  });
+});
+
+client.on(Events.MessageCreate, (message) => {
+  void handleMessage(message).catch((error) => {
+    console.error("[faq] error while handling a message:", error);
+  });
+});
+
+client.on(Events.InteractionCreate, (interaction) => {
+  void handleCommand(interaction).catch((error) => {
+    console.error("[faq] error while handling an interaction:", error);
+  });
+});
+
+client.on(Events.ShardError, (error, shardId) => {
+  console.error(`[faq] shard ${shardId} error:`, error);
+  if (/privileged|intent/i.test(String((error as Error)?.message ?? error))) printIntentHelp();
+});
+
+client.on(Events.Warn, (message) => console.warn("[faq]", message));
+client.on(Events.Debug, (message) => {
+  if (process.env.DEBUG) console.debug("[faq]", message);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[faq] unhandled rejection:", reason);
+});
+
+async function main(): Promise<void> {
+  config = await loadConfig();
+  triggers = compileTriggers(config.entries);
+  console.log(
+    `[faq] loaded ${process.env.CONFIG_PATH ?? "config/faq.json"} with ` +
+      `${config.entries.length} entries`,
+  );
+  await client.login(token);
+}
+
+void main().catch((error) => {
+  if (error instanceof Error && /privileged|intent/i.test(error.message)) printIntentHelp();
+  console.error("[faq] failed to start:", error);
+  process.exit(1);
+});

@@ -1,0 +1,50 @@
+{
+  "settings": {
+    "embedColor": "#5865F2",
+    "replyMentions": false,
+    "cooldownSeconds": 10,
+    "ignoreBots": true,
+    "channelAllowlist": []
+  },
+  "entries": [
+    {
+      "id": "verification",
+      "label": "Verification",
+      "triggers": [
+        "how do i get verified",
+        "how to get verified",
+        "verification",
+        "verify my account",
+        "/how.*verif/i"
+      ],
+      "target": { "type": "pin", "channelId": "000000000000000000", "index": 0 },
+      "message": "Everything about getting verified is in the pinned guide in #welcome.",
+      "color": "#57F287"
+    },
+    {
+      "id": "rules",
+      "label": "Server rules",
+      "triggers": ["server rules", "rules", "guidelines", "code of conduct"],
+      "target": { "type": "thread", "channelId": "000000000000000000" },
+      "message": "The full list of rules lives in this post — please read it before posting.",
+      "color": "#FEE75C"
+    },
+    {
+      "id": "roles",
+      "label": "Roles & self-assign",
+      "triggers": ["how to get roles", "self assign", "role menu", "missing roles"],
+      "target": { "type": "url", "url": "https://example.com/docs/roles" },
+      "message": "Pick up your roles from the role menu, or follow the written setup guide here.",
+      "color": "#EB459E"
+    },
+    {
+      "id": "boosting",
+      "label": "Server boosting",
+      "triggers": ["nitro boost", "boosting", "booster perks"],
+      "target": { "type": "pin", "channelId": "000000000000000000", "index": 1 },
+      "message": "Current booster perks and how to claim them.",
+      "color": "#5865F2",
+      "channelIds": ["000000000000000000"]
+    }
+  ]
+}
