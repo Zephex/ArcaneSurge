@@ -14,6 +14,7 @@ import {
 } from "discord.js";
 import { type FaqConfig, loadConfig } from "./config.js";
 import { type CompiledTrigger, compileTriggers, findMatch } from "./matcher.js";
+import { watch } from "node:fs";
 import { resolveTarget } from "./targets.js";
 import { decodePobCode, looksLikePobCode, parsePobSummary, type PobSummary, uploadToPobbin } from "./pob.js";
 import { extractPoeLinks, fetchPobCodeFromUrl, linkTypeName, type PoeLink } from "./poeLinks.js";
@@ -161,9 +162,14 @@ async function replyWithFaq(
 async function handleCommand(interaction: Interaction): Promise<void> {
   if (!interaction.isChatInputCommand()) return;
 
-  // Check command channel allowlist
-  const cmdChannels = config.settings.commandChannels;
-  if (cmdChannels.length > 0 && interaction.channelId && !cmdChannels.includes(interaction.channelId)) {
+  const { features, commandChannels } = config.settings;
+  const featureOn = interaction.commandName === "faq" ? features.faq : features.pobCodes;
+  if (!features.commands || !featureOn) {
+    await interaction.reply({ content: "This command is turned off.", ephemeral: true });
+    return;
+  }
+
+  if (commandChannels.length > 0 && interaction.channelId && !commandChannels.includes(interaction.channelId)) {
     await interaction.reply({ content: "Commands are not enabled in this channel.", ephemeral: true });
     return;
   }
@@ -396,57 +402,68 @@ async function handleMessage(message: Message): Promise<void> {
   if (!message.guild) return;
   if (config.settings.ignoreBots && message.author.bot) return;
 
-  const allowlist = config.settings.messageChannels;
-  if (allowlist.length > 0 && !allowlist.includes(message.channelId)) {
-    // Still allow PoB code detection and PoE link handling in non-allowlisted channels
-    // if codeChannels or commandChannels include this channel
-  }
+  const { features } = config.settings;
+  const inChannel = (list: string[]) => list.length === 0 || list.includes(message.channelId);
 
-  // Check message attachments for PoB codes (Discord converts long pastes to .txt files)
-  const codeChannels = config.settings.codeChannels;
-  const codeAllowed = codeChannels.length === 0 || codeChannels.includes(message.channelId);
-  if (codeAllowed) {
+  if (features.pobCodes && inChannel(config.settings.codeChannels)) {
     const pobCodeFromAttachment = await extractPobCodeFromAttachments(message);
     if (pobCodeFromAttachment) {
       await handlePobCodeInMessage(message, pobCodeFromAttachment);
       return;
     }
-  }
 
-  if (message.content) {
-    if (codeAllowed) {
+    if (message.content) {
       const pobCode = extractPobCode(message.content);
       if (pobCode) {
         await handlePobCodeInMessage(message, pobCode);
         return;
       }
-
-      const poeLinks = extractPoeLinks(message.content);
-      if (poeLinks.length > 0) {
-        await handlePoeLinksInMessage(message, poeLinks);
-        return;
-      }
     }
-
-    // FAQ keyword triggers — only in messageChannels (or all if empty)
-    const msgChannels = config.settings.messageChannels;
-    if (msgChannels.length > 0 && !msgChannels.includes(message.channelId)) {
-      return;
-    }
-
-    const match = findMatch(triggers, message.content);
-    if (!match) return;
-    if (match.entry.channelIds && !match.entry.channelIds.includes(message.channelId)) return;
-
-    const now = Date.now();
-    if (now - (cooldowns.get(message.author.id) ?? 0) < config.settings.cooldownSeconds * 1000) {
-      return;
-    }
-    cooldowns.set(message.author.id, now);
-
-    const reply: FaqReply = (payload) => message.reply(payload);
-    await replyWithFaq(reply, match, message.guild.id);
   }
+
+  if (features.poeLinks && message.content && inChannel(config.settings.linkChannels)) {
+    const poeLinks = extractPoeLinks(message.content);
+    if (poeLinks.length > 0) {
+      await handlePoeLinksInMessage(message, poeLinks);
+      return;
+    }
+  }
+
+  if (!features.faq || !message.content || !inChannel(config.settings.messageChannels)) return;
+
+  const match = findMatch(triggers, message.content);
+  if (!match) return;
+  if (match.entry.channelIds && !match.entry.channelIds.includes(message.channelId)) return;
+
+  const now = Date.now();
+  if (now - (cooldowns.get(message.author.id) ?? 0) < config.settings.cooldownSeconds * 1000) {
+    return;
+  }
+  cooldowns.set(message.author.id, now);
+
+  const reply: FaqReply = (payload) => message.reply(payload);
+  await replyWithFaq(reply, match, message.guild.id);
+}
+
+const CONFIG_FILE = process.env.CONFIG_PATH || "config/faq.json";
+
+async function reloadConfig(): Promise<void> {
+  try {
+    const next = await loadConfig();
+    config = next;
+    triggers = compileTriggers(next.entries);
+    console.log(`[faq] reloaded ${CONFIG_FILE}: ${next.entries.length} entries, ${triggers.length} triggers`);
+  } catch (error) {
+    console.error("[faq] config reload failed, keeping the previous config:", (error as Error).message);
+  }
+}
+
+function watchConfig(): void {
+  let timer: NodeJS.Timeout | undefined;
+  watch(CONFIG_FILE, () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => void reloadConfig(), 300);
+  });
 }
 
 client.once(Events.ClientReady, (ready) => {
@@ -501,6 +518,7 @@ async function main(): Promise<void> {
       `${config.entries.length} entries`,
   );
   await client.login(token);
+  watchConfig();
 }
 
 void main().catch((error) => {

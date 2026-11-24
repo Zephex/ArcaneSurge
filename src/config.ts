@@ -39,6 +39,17 @@ export interface Settings {
   codeChannels: string[];
   /** If non-empty, slash commands only work in these channels. */
   commandChannels: string[];
+  /** If non-empty, PoE build links (pobb.in, Pastebin, ...) are only handled in these channels. */
+  linkChannels: string[];
+  /** Turn whole features on or off. */
+  features: Features;
+}
+
+export interface Features {
+  faq: boolean;
+  pobCodes: boolean;
+  poeLinks: boolean;
+  commands: boolean;
 }
 
 export interface FaqConfig {
@@ -54,6 +65,8 @@ const DEFAULT_SETTINGS: Settings = {
   messageChannels: [],
   codeChannels: [],
   commandChannels: [],
+  linkChannels: [],
+  features: { faq: true, pobCodes: true, poeLinks: true, commands: true },
 };
 
 export class ConfigError extends Error {
@@ -178,7 +191,7 @@ function validateSettings(raw: unknown): Settings {
   const where = "settings";
   const source = raw === undefined ? {} : asObject(raw, where);
 
-  const settings: Settings = { ...DEFAULT_SETTINGS };
+  const settings: Settings = { ...DEFAULT_SETTINGS, features: { ...DEFAULT_SETTINGS.features } };
 
   if (source.embedColor !== undefined) {
     if (typeof source.embedColor !== "string" || !HEX_COLOR.test(source.embedColor)) {
@@ -217,6 +230,20 @@ function validateSettings(raw: unknown): Settings {
     const bad = ids.find((id) => !isSnowflake(id));
     if (bad !== undefined) fail(`${where}.commandChannels`, `"${bad}" is not a channel ID`);
     settings.commandChannels = ids;
+  }
+  if (source.linkChannels !== undefined) {
+    const ids = asStringArray(source.linkChannels, `${where}.linkChannels`);
+    const bad = ids.find((id) => !isSnowflake(id));
+    if (bad !== undefined) fail(`${where}.linkChannels`, `"${bad}" is not a channel ID`);
+    settings.linkChannels = ids;
+  }
+  if (source.features !== undefined) {
+    const features = asObject(source.features, `${where}.features`);
+    for (const key of Object.keys(DEFAULT_SETTINGS.features) as Array<keyof Features>) {
+      if (features[key] === undefined) continue;
+      if (typeof features[key] !== "boolean") fail(`${where}.features.${key}`, "expected true or false");
+      settings.features[key] = features[key] as boolean;
+    }
   }
 
   const unknown = Object.keys(source).filter(

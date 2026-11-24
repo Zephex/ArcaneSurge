@@ -1,9 +1,12 @@
 import "dotenv/config";
 import express from "express";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import crypto from "node:crypto";
 import { type FaqConfig, loadConfig } from "./config.js";
-import { Client, GatewayIntentBits, REST } from "discord.js";
+import { REST, Routes } from "discord.js";
+
+// Text (0), announcement (5) and forum (15) channels are the ones that carry messages.
+const MESSAGE_CHANNEL_TYPES = [0, 5, 15];
 
 const app = express();
 app.use(express.json());
@@ -133,14 +136,8 @@ app.get("/auth/callback", async (req, res) => {
       return;
     }
 
-    const botClient = new Client({ intents: [GatewayIntentBits.Guilds] });
-    await botClient.login(botToken);
-    if (!botClient.isReady()) {
-      await new Promise<void>((resolve) => botClient.once("ready", () => resolve()));
-    }
-    const botGuilds = await botClient.guilds.fetch();
-    const botGuildIds = new Set(botGuilds.keys());
-    await botClient.destroy();
+    const botGuilds = (await new REST().setToken(botToken).get(Routes.userGuilds())) as Array<{ id: string }>;
+    const botGuildIds = new Set(botGuilds.map((g) => g.id));
 
     // Find a guild where both the user and bot are present, and user has admin/manage permissions
     let allowedGuildId: string | null = null;
@@ -209,37 +206,53 @@ app.get("/api/config", async (_req, res) => {
 // API: Save config
 app.post("/api/config", async (req, res) => {
   try {
-    const config = req.body as FaqConfig;
-    writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", "utf8");
-    res.json({ ok: true, message: "Config saved. Restart the bot to apply changes." });
+    const body = JSON.stringify(req.body as FaqConfig, null, 2) + "\n";
+    const candidate = `${CONFIG_PATH}.candidate`;
+    writeFileSync(candidate, body, "utf8");
+    try {
+      await loadConfig(candidate);
+    } finally {
+      unlinkSync(candidate);
+    }
+    writeFileSync(CONFIG_PATH, body, "utf8");
+    res.json({ ok: true, message: "Saved. The bot picks up the change within a second." });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
 });
 
-// API: Get bot status
+// API: Get the servers and message channels the bot can see
 app.get("/api/status", async (_req, res) => {
   try {
-    const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-    await client.login(process.env.DISCORD_TOKEN);
-    if (!client.isReady()) {
-      await new Promise<void>((resolve) => client.once("ready", () => resolve()));
-    }
-    const guilds = await client.guilds.fetch();
-    const rest = new REST().setToken(process.env.DISCORD_TOKEN as string);
+    const token = process.env.DISCORD_TOKEN as string;
+    const rest = new REST().setToken(token);
+    const guilds = (await rest.get(Routes.userGuilds())) as Array<{ id: string; name: string }>;
+
     const guildList = [];
-    for (const guild of guilds.values()) {
-      const channels = (await rest.get(`/guilds/${guild.id}/channels`)) as Array<{ id: string; name: string; type: number }>;
+    for (const guild of guilds) {
+      const channels = (await rest.get(Routes.guildChannels(guild.id))) as Array<{
+        id: string;
+        name?: string;
+        type: number;
+        parent_id?: string | null;
+      }>;
+      const categories = new Map(
+        channels.filter((c) => c.type === 4).map((c) => [c.id, c.name ?? ""]),
+      );
       guildList.push({
         id: guild.id,
         name: guild.name,
         channels: channels
-          .filter((c) => ![10, 11, 12].includes(c.type))
-          .map((c) => ({ id: c.id, name: c.name, type: c.type })),
+          .filter((c) => MESSAGE_CHANNEL_TYPES.includes(c.type))
+          .map((c) => ({
+            id: c.id,
+            name: c.name ?? c.id,
+            type: c.type,
+            category: c.parent_id ? categories.get(c.parent_id) ?? "" : "",
+          })),
       });
     }
-    await client.destroy();
-    res.json({ guilds: guildList, token: "set" });
+    res.json({ guilds: guildList });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
@@ -377,6 +390,24 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
   <div class="grid">
     <div class="card">
       <h2>Settings</h2>
+      <h3>Features</h3>
+      <label><input type="checkbox" id="feat-faq"> FAQ keyword replies</label>
+      <label><input type="checkbox" id="feat-pobCodes"> PoB code detection (messages, .txt files, Pastebin)</label>
+      <label><input type="checkbox" id="feat-poeLinks"> PoE build links (pobb.in, poedb.tw, ...)</label>
+      <label><input type="checkbox" id="feat-commands"> Slash commands (/faq, /pob)</label>
+
+      <h3>Channels</h3>
+      <p class="hint">Hold Ctrl (Cmd on Mac) to pick several. Nothing selected means the feature works in every channel.</p>
+      <label>FAQ keyword replies</label>
+      <select multiple size="6" id="ch-messageChannels"></select>
+      <label>PoB codes</label>
+      <select multiple size="6" id="ch-codeChannels"></select>
+      <label>PoE build links</label>
+      <select multiple size="6" id="ch-linkChannels"></select>
+      <label>Slash commands</label>
+      <select multiple size="6" id="ch-commandChannels"></select>
+
+      <h3>Other</h3>
       <label>Embed Color</label>
       <input type="text" id="embedColor" placeholder="#5865F2">
       <label>Reply Mentions</label>
@@ -391,12 +422,6 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
         <option value="true">Yes</option>
         <option value="false">No</option>
       </select>
-      <label>Message Channels (comma-separated IDs, empty = all)</label>
-      <input type="text" id="messageChannels" placeholder="123, 456">
-      <label>Code Channels (comma-separated IDs, empty = all)</label>
-      <input type="text" id="codeChannels" placeholder="123, 456">
-      <label>Command Channels (comma-separated IDs, empty = all)</label>
-      <input type="text" id="commandChannels" placeholder="123, 456">
       <button class="btn" onclick="saveSettings()">Save Settings</button>
     </div>
 
@@ -425,19 +450,51 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
       loadRawConfig();
     }
 
+    const CHANNEL_KEYS = ['messageChannels', 'codeChannels', 'linkChannels', 'commandChannels'];
+    const FEATURE_KEYS = ['faq', 'pobCodes', 'poeLinks', 'commands'];
+    let channelData = [];
+
     function populateForm() {
       if (!config) return;
       document.getElementById('embedColor').value = config.settings.embedColor;
       document.getElementById('replyMentions').value = String(config.settings.replyMentions);
       document.getElementById('cooldownSeconds').value = config.settings.cooldownSeconds;
       document.getElementById('ignoreBots').value = String(config.settings.ignoreBots);
-      document.getElementById('messageChannels').value = (config.settings.messageChannels || []).join(', ');
-      document.getElementById('codeChannels').value = (config.settings.codeChannels || []).join(', ');
-      document.getElementById('commandChannels').value = (config.settings.commandChannels || []).join(', ');
+      for (const f of FEATURE_KEYS) {
+        document.getElementById('feat-' + f).checked = config.settings.features[f] !== false;
+      }
+      buildChannelSelects();
     }
 
-    function parseIds(str) {
-      return str.split(',').map(s => s.trim()).filter(s => s.length > 0);
+    function buildChannelSelects() {
+      for (const key of CHANNEL_KEYS) {
+        const sel = document.getElementById('ch-' + key);
+        const chosen = (config && config.settings[key]) || [];
+        sel.innerHTML = '';
+        for (const guild of channelData) {
+          const groups = {};
+          for (const ch of guild.channels) {
+            const cat = ch.category || 'No category';
+            (groups[cat] = groups[cat] || []).push(ch);
+          }
+          for (const cat of Object.keys(groups)) {
+            const group = document.createElement('optgroup');
+            group.label = guild.name + ' / ' + cat;
+            for (const ch of groups[cat]) {
+              const opt = document.createElement('option');
+              opt.value = ch.id;
+              opt.textContent = '#' + ch.name;
+              opt.selected = chosen.includes(ch.id);
+              group.appendChild(opt);
+            }
+            sel.appendChild(group);
+          }
+        }
+      }
+    }
+
+    function selectedIds(key) {
+      return Array.from(document.getElementById('ch-' + key).selectedOptions).map(o => o.value);
     }
 
     async function saveSettings() {
@@ -446,9 +503,8 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
       config.settings.replyMentions = document.getElementById('replyMentions').value === 'true';
       config.settings.cooldownSeconds = Number(document.getElementById('cooldownSeconds').value);
       config.settings.ignoreBots = document.getElementById('ignoreBots').value === 'true';
-      config.settings.messageChannels = parseIds(document.getElementById('messageChannels').value);
-      config.settings.codeChannels = parseIds(document.getElementById('codeChannels').value);
-      config.settings.commandChannels = parseIds(document.getElementById('commandChannels').value);
+      for (const key of CHANNEL_KEYS) config.settings[key] = selectedIds(key);
+      for (const f of FEATURE_KEYS) config.settings.features[f] = document.getElementById('feat-' + f).checked;
       await saveConfig();
     }
 
@@ -519,7 +575,7 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
       });
       const data = await res.json();
       if (data.ok) {
-        alert('Config saved! Restart the bot to apply changes.');
+        alert(data.message || 'Saved.');
       } else {
         alert('Error: ' + (data.error || 'Unknown error'));
       }
@@ -533,12 +589,14 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
         container.innerHTML = '<span class="status err">Error: ' + data.error + '</span>';
         return;
       }
+      channelData = data.guilds;
       let html = '<span class="status ok">Connected</span><br>';
       for (const guild of data.guilds) {
         html += '<br><strong>' + guild.name + '</strong> (' + guild.id + ')<br>';
-        html += '<small>Channels: ' + guild.channels.map(c => c.name + ' (' + c.id + ')').join(', ') + '</small><br>';
+        html += '<small>' + guild.channels.length + ' message channels</small><br>';
       }
       container.innerHTML = html;
+      buildChannelSelects();
     }
 
     async function loadRawConfig() {
@@ -547,8 +605,7 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
       document.getElementById('rawConfig').value = text;
     }
 
-    loadConfig();
-    loadStatus();
+    loadConfig().then(loadStatus);
   </script>
 </body>
 </html>`;
