@@ -16,6 +16,7 @@ import { type FaqConfig, loadConfig } from "./config.js";
 import { type CompiledTrigger, compileTriggers, findMatch } from "./matcher.js";
 import { resolveTarget } from "./targets.js";
 import { decodePobCode, looksLikePobCode, parsePobSummary, type PobSummary } from "./pob.js";
+import { extractPoeLinks, fetchPobCodeFromUrl, linkTypeName, type PoeLink } from "./poeLinks.js";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -265,6 +266,61 @@ function extractPobCode(text: string): string | null {
   return null;
 }
 
+async function handlePoeLinksInMessage(message: Message, links: PoeLink[]): Promise<void> {
+  for (const link of links) {
+    // Try to fetch and decode a PoB code from the link
+    const xml = await fetchPobCodeFromUrl(link);
+    if (xml) {
+      try {
+        const summary = parsePobSummary(xml);
+        const embed = new EmbedBuilder()
+          .setColor(toColor(config.settings.embedColor))
+          .setTitle(`${summary.className ?? "PoE Build"}${summary.ascendancy ? ` — ${summary.ascendancy}` : ""}`)
+          .setDescription(summary.mainSkill ? `**Main skill:** ${summary.mainSkill}` : "Build decoded")
+          .addFields(
+            { name: "Game", value: summary.game, inline: true },
+            ...(summary.level ? [{ name: "Level", value: String(summary.level), inline: true }] : []),
+            ...(summary.skills.length > 1
+              ? [{ name: "Skills", value: summary.skills.slice(0, 5).join(", "), inline: false }]
+              : []),
+          )
+          .setFooter({ text: `Decoded from ${linkTypeName(link.type)} link` });
+
+        if (summary.notes) {
+          embed.addFields({ name: "Notes", value: summary.notes.slice(0, 300), inline: false });
+        }
+
+        await message.reply({ embeds: [embed], allowedMentions: { repliedUser: false } });
+        return;
+      } catch {
+        // Fall through to helpful message
+      }
+    }
+
+    // If we couldn't decode, respond with a helpful message for known sites
+    const name = linkTypeName(link.type);
+    let helpText = "";
+    switch (link.type) {
+      case "maxroll":
+        helpText = "Maxroll build guides contain PoB codes. To decode, copy the PoB code from the guide and paste it here, or use `/pob <code>`.";
+        break;
+      case "pob.codes":
+        helpText = "pob.codes is a PoB viewer. To decode the build, copy the PoB share code from pob.codes and paste it here, or use `/pob <code>`.";
+        break;
+      case "poe.ninja":
+        helpText = "poe.ninja shows builds but doesn't expose raw PoB codes directly. You can usually find the PoB code on the build's page or ask the author.";
+        break;
+      default:
+        helpText = `I detected a ${name} link but couldn't extract a PoB code from it. Try pasting the raw PoB code directly.`;
+    }
+
+    if (helpText) {
+      await message.reply({ content: helpText, allowedMentions: { repliedUser: false } });
+      return;
+    }
+  }
+}
+
 async function handlePobCodeInMessage(message: Message, code: string): Promise<void> {
   try {
     const xml = await decodePobCode(code);
@@ -335,6 +391,13 @@ async function handleMessage(message: Message): Promise<void> {
     const pobCode = extractPobCode(message.content);
     if (pobCode) {
       await handlePobCodeInMessage(message, pobCode);
+      return;
+    }
+
+    // Check for PoE-related links (pobb.in, poedb.tw, maxroll, poe.ninja, pob.codes)
+    const poeLinks = extractPoeLinks(message.content);
+    if (poeLinks.length > 0) {
+      await handlePoeLinksInMessage(message, poeLinks);
       return;
     }
 
