@@ -28,6 +28,30 @@ export async function decodePobCode(code: string): Promise<string> {
   return xml;
 }
 
+const POBBIN_UPLOAD_URL = "https://pobb.in/pob/";
+const POBBIN_USER_AGENT = "ArcaneSurge-Discord-Bot/1.0 (contact: discord ArcaneSurge)";
+
+/**
+ * Upload a PoB share code to pobb.in and return the public link.
+ * Returns null if the upload fails or pobb.in rejects the code.
+ * Note: pobb.in pastes are public.
+ */
+export async function uploadToPobbin(code: string): Promise<string | null> {
+  try {
+    const response = await fetch(POBBIN_UPLOAD_URL, {
+      method: "POST",
+      headers: { "User-Agent": POBBIN_USER_AGENT, "Content-Type": "text/plain" },
+      body: code.trim(),
+    });
+    if (!response.ok) return null;
+    const id = (await response.text()).trim();
+    if (!/^[A-Za-z0-9_-]{4,64}$/.test(id)) return null;
+    return `https://pobb.in/${id}`;
+  } catch {
+    return null;
+  }
+}
+
 /** Extract a single attribute value from an XML tag. */
 function attr(tag: string, name: string): string | undefined {
   const re = new RegExp(`\\b${name}="([^"]*)"`, "i");

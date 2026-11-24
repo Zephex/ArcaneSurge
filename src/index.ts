@@ -15,7 +15,7 @@ import {
 import { type FaqConfig, loadConfig } from "./config.js";
 import { type CompiledTrigger, compileTriggers, findMatch } from "./matcher.js";
 import { resolveTarget } from "./targets.js";
-import { decodePobCode, looksLikePobCode, parsePobSummary, type PobSummary } from "./pob.js";
+import { decodePobCode, looksLikePobCode, parsePobSummary, type PobSummary, uploadToPobbin } from "./pob.js";
 import { extractPoeLinks, fetchPobCodeFromUrl, linkTypeName, type PoeLink } from "./poeLinks.js";
 import "./admin.js"; // Start admin web interface
 
@@ -346,6 +346,12 @@ async function handlePobCodeInMessage(message: Message, code: string): Promise<v
           : []),
       )
       .setFooter({ text: "Auto-detected from a Path of Building share code" });
+
+    const pobbinUrl = await uploadToPobbin(code);
+    if (pobbinUrl) {
+      embed.setURL(pobbinUrl);
+      embed.addFields({ name: "pobb.in", value: pobbinUrl, inline: false });
+    }
 
     await message.reply({ embeds: [embed], allowedMentions: { repliedUser: false } });
   } catch {
