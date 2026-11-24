@@ -358,6 +358,7 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
     .btn-logout { background: #4f545c; }
     input, textarea, select { background: #0f3460; color: #e0e0e0; border: 1px solid #2a2a4a; padding: 8px; border-radius: 4px; width: 100%; margin: 5px 0; font-family: inherit; }
     textarea { min-height: 100px; font-family: monospace; }
+    select[multiple] { min-height: 320px; }
     .entry { background: #0f3460; padding: 15px; border-radius: 6px; margin: 10px 0; }
     .entry h3 { color: #57F287; }
     .tag { display: inline-block; background: #5865F2; color: white; padding: 2px 8px; border-radius: 12px; margin: 2px; font-size: 12px; }
@@ -399,13 +400,13 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
       <h3>Channels</h3>
       <p class="hint">Hold Ctrl (Cmd on Mac) to pick several. Nothing selected means the feature works in every channel.</p>
       <label>FAQ keyword replies</label>
-      <select multiple size="6" id="ch-messageChannels"></select>
+      <select multiple size="14" id="ch-messageChannels"></select>
       <label>PoB codes</label>
-      <select multiple size="6" id="ch-codeChannels"></select>
+      <select multiple size="14" id="ch-codeChannels"></select>
       <label>PoE build links</label>
-      <select multiple size="6" id="ch-linkChannels"></select>
+      <select multiple size="14" id="ch-linkChannels"></select>
       <label>Slash commands</label>
-      <select multiple size="6" id="ch-commandChannels"></select>
+      <select multiple size="14" id="ch-commandChannels"></select>
 
       <h3>Other</h3>
       <label>Embed Color</label>
