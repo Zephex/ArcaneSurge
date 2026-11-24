@@ -57,9 +57,11 @@ Use the helper scripts to discover IDs instead of digging through the dev tools:
 ```bash
 npm run ids                 # guilds, channels, active threads
 npm run pins -- <channelId> # a channel's pins, with index and jump link
+npm run check               # resolve every target in the config against the API
 ```
 
-`config/faq.json` ships with four example entries. Replace the `0000…` IDs.
+`config/faq.json` ships pre-wired for one server as a worked example — swap in
+your own guild and channel IDs.
 
 ```jsonc
 {
@@ -90,7 +92,7 @@ npm run pins -- <channelId> # a channel's pins, with index and jump link
 |---|---|---|
 | `{ "type": "pin", "channelId": "…", "index": 0 }` | The *n*-th pinned message in a channel (`0` = top pin). Pins are cached for 60s. | `{ "type": "pin", "channelId": "123", "index": 1 }` |
 | `{ "type": "thread", "channelId": "…" }` | A thread or forum post. A forum post **is** a thread, so this covers both. | `{ "type": "thread", "channelId": "123" }` |
-| `{ "type": "thread", "channelId": "…", "messageId": "…" }` | A specific message inside that thread. | |
+| `{ "type": "thread", "channelId": "…", "messageId": "…" }` | Any specific message — a rules post, an announcement, a reply. Without `messageId` it jumps to the channel, thread or forum itself. | `{ "type": "thread", "channelId": "123", "messageId": "456" }` |
 | `{ "type": "url", "url": "https://…" }` | Any http(s) URL — Notion, docs site, GitHub README. | `{ "type": "url", "url": "https://example.com/faq" }` |
 
 Mixing them is fine: some entries can point at pins while others point at docs.
@@ -118,6 +120,7 @@ Mixing them is fine: some entries can point at pins while others point at docs.
 ```bash
 npm install
 npm test          # 21 checks on matching, priority and config validation
+npm run check     # every configured target resolves against the live server
 npm run dev       # auto-restarts on file changes
 ```
 
@@ -144,6 +147,7 @@ npm start
 | `DISCORD_TOKEN is not set` | Copy `.env.example` → `.env`. |
 | `channel … has no pinned messages` | Pin the FAQ message, or point the entry at a `thread`/`url` target. |
 | `pin index N is out of range` | The channel has fewer pins than you asked for. Run `npm run pins -- <id>`. |
+| A link 404s or points at the wrong post | A pin was moved or a thread archived. Run `npm run check`. |
 | `/faq` missing from the command list | Global registration can take up to an hour — set `GUILD_ID` for instant registration. |
 | Bot replies twice per message | Lower `cooldownSeconds`, or make sure `ignoreBots` is `true`. |
 
@@ -158,5 +162,6 @@ src/matcher.ts    normalisation, word boundaries, priority, regex triggers
 src/targets.ts    turns a target into a jump URL (pins are cached)
 src/index.ts      gateway wiring, replies, /faq command
 src/tools.ts      `npm run ids` / `npm run pins` helpers
+src/check.ts      `npm run check` — validates every target resolves
 src/selftest.ts   `npm test`
 ```

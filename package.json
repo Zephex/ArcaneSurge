@@ -11,6 +11,7 @@
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "test": "tsx src/selftest.ts",
+    "check": "tsx src/check.ts",
     "ids": "tsx src/tools.ts ids",
     "pins": "tsx src/tools.ts pins"
   },

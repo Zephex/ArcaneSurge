@@ -2,6 +2,7 @@ import "dotenv/config";
 import {
   ChannelType,
   Client,
+  Events,
   GatewayIntentBits,
   REST,
   Routes,
@@ -32,23 +33,47 @@ function channelPosition(channel: { position?: number }): number {
   return channel.position ?? 0;
 }
 
+/** A channel as returned by the REST API — no discord.js instance needed. */
+interface ListedChannel {
+  id: string;
+  name?: string;
+  type: ChannelType;
+  position?: number;
+}
+
+const THREAD_TYPES = new Set<number>([
+  ChannelType.AnnouncementThread,
+  ChannelType.PublicThread,
+  ChannelType.PrivateThread,
+]);
+
 async function listIds(): Promise<void> {
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
   await client.login(process.env.DISCORD_TOKEN);
 
+  if (!client.isReady()) {
+    await new Promise<void>((resolve) => client.once(Events.ClientReady, () => resolve()));
+  }
+
   const rest = new REST().setToken(process.env.DISCORD_TOKEN as string);
 
-  if (client.guilds.cache.size === 0) {
+  // login() resolves at READY, before GUILD_CREATE has populated the cache —
+  // the cache then holds stub Guilds with an id but no name or channels. The
+  // guild list is a plain REST call, and channels are fetched per guild below.
+  const guilds = await client.guilds.fetch();
+
+  if (guilds.size === 0) {
     console.log("The bot is not in any guilds yet — invite it first.");
   }
 
-  for (const guild of client.guilds.cache.values()) {
+  for (const guild of guilds.values()) {
     console.log(`\n${guild.name}   guildId=${guild.id}`);
 
-    const channels = [...guild.channels.cache.values()]
-      .filter((channel) => !channel.isThread()) // threads are listed separately below
+    const channels = (await rest.get(Routes.guildChannels(guild.id))) as ListedChannel[];
+    const sorted = channels
+      .filter((channel) => !THREAD_TYPES.has(channel.type)) // threads are listed below
       .sort((a, b) => channelPosition(a) - channelPosition(b));
-    for (const channel of channels) {
+    for (const channel of sorted) {
       console.log(`  ${typeName(channel.type).padEnd(18)} ${channel.name ?? "(unknown)"}  ${channel.id}`);
     }
 

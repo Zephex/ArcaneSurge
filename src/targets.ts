@@ -1,4 +1,4 @@
-import { type Client, type Collection, type Message, type Snowflake } from "discord.js";
+import { type Client, type Message, type Snowflake } from "discord.js";
 import type { Target } from "./config.js";
 
 /** Pins change rarely; re-fetching every hit would burn the rate limit. */
@@ -24,14 +24,18 @@ export async function fetchPins(client: Client, channelId: string): Promise<Mess
 
   const messages = (
     channel as unknown as {
-      messages?: { fetchPinned(): Promise<Collection<string, Message>> };
+      messages?: {
+        fetchPins(options?: { limit?: number }): Promise<{ items: readonly { message: Message }[] }>;
+      };
     }
   ).messages;
-  if (!messages?.fetchPinned) {
+  if (!messages?.fetchPins) {
     throw new Error(`channel ${channelId} does not support fetching pinned messages`);
   }
 
-  const pins = [...(await messages.fetchPinned()).values()];
+  // 50 is Discord's maximum page size for pins, so a single call is enough.
+  const { items } = await messages.fetchPins({ limit: 50 });
+  const pins = items.map((item) => item.message);
   pinCache.set(channelId, { pins, at: Date.now() });
   return pins;
 }
