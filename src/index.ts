@@ -77,7 +77,8 @@ const POB_COMMAND = new SlashCommandBuilder()
     option
       .setName("code")
       .setDescription("The PoB share code (paste the long string from PoB's Share button)")
-      .setRequired(true),
+      .setRequired(true)
+      .setMaxLength(4000),
   )
   .toJSON();
 

@@ -137,6 +137,17 @@ npm start
 |---|---|
 | `/faq` | Lists every configured topic (ephemeral). |
 | `/faq query:<text>` | Tests a phrase against the config — the fastest way to tune triggers without spamming a channel. |
+| `/pob <code>` | Decodes a Path of Building share code and shows build info (class, ascendancy, level, skills, notes). |
+
+## Path of Exile support
+
+The bot includes Path of Exile third-party tool support:
+
+- **`/pob <code>`** — Paste a PoB share code to get a decoded build summary embed
+- **Auto-detection** — When someone pastes a PoB code in a channel, the bot automatically decodes it and replies with build info
+- **FAQ entries** — PoE/PoB related questions are answered with links to the FAQ forum
+
+PoB codes are URL-safe base64 of zlib-compressed XML. The decoder handles both PoE1 and PoE2 formats.
 
 ## Troubleshooting
 
@@ -160,7 +171,8 @@ config/faq.json   triggers and targets — edit this, not the code
 src/config.ts     loads and validates the config
 src/matcher.ts    normalisation, word boundaries, priority, regex triggers
 src/targets.ts    turns a target into a jump URL (pins are cached)
-src/index.ts      gateway wiring, replies, /faq command
+src/pob.ts       PoB share code decoder (base64 + zlib) + XML parser
+src/index.ts      gateway wiring, replies, /faq and /pob commands
 src/tools.ts      `npm run ids` / `npm run pins` helpers
 src/check.ts      `npm run check` — validates every target resolves
 src/selftest.ts   `npm test`
