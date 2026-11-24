@@ -359,6 +359,9 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
     input, textarea, select { background: #0f3460; color: #e0e0e0; border: 1px solid #2a2a4a; padding: 8px; border-radius: 4px; width: 100%; margin: 5px 0; font-family: inherit; }
     textarea { min-height: 100px; font-family: monospace; }
     select[multiple] { min-height: 320px; }
+    .guild-block { border: 1px solid #2a2a4a; border-radius: 6px; padding: 12px; margin: 12px 0; }
+    .guild-block h4 { color: #57F287; margin-bottom: 4px; }
+    .hint { color: #a0a0a0; font-size: 13px; margin: 6px 0; }
     .entry { background: #0f3460; padding: 15px; border-radius: 6px; margin: 10px 0; }
     .entry h3 { color: #57F287; }
     .tag { display: inline-block; background: #5865F2; color: white; padding: 2px 8px; border-radius: 12px; margin: 2px; font-size: 12px; }
@@ -398,15 +401,8 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
       <label><input type="checkbox" id="feat-commands"> Slash commands (/faq, /pob)</label>
 
       <h3>Channels</h3>
-      <p class="hint">Hold Ctrl (Cmd on Mac) to pick several. Nothing selected means the feature works in every channel.</p>
-      <label>FAQ keyword replies</label>
-      <select multiple size="14" id="ch-messageChannels"></select>
-      <label>PoB codes</label>
-      <select multiple size="14" id="ch-codeChannels"></select>
-      <label>PoE build links</label>
-      <select multiple size="14" id="ch-linkChannels"></select>
-      <label>Slash commands</label>
-      <select multiple size="14" id="ch-commandChannels"></select>
+      <p class="hint">Each server has its own pickers. Hold Ctrl (Cmd on Mac) to select several. A feature only works in the channels selected across all servers. Leave every box empty to allow all channels.</p>
+      <div id="channel-pickers"></div>
 
       <h3>Other</h3>
       <label>Embed Color</label>
@@ -467,12 +463,32 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
       buildChannelSelects();
     }
 
+    const CHANNEL_LABELS = {
+      messageChannels: 'FAQ keyword replies',
+      codeChannels: 'PoB codes',
+      linkChannels: 'PoE build links',
+      commandChannels: 'Slash commands',
+    };
+
     function buildChannelSelects() {
-      for (const key of CHANNEL_KEYS) {
-        const sel = document.getElementById('ch-' + key);
-        const chosen = (config && config.settings[key]) || [];
-        sel.innerHTML = '';
-        for (const guild of channelData) {
+      const container = document.getElementById('channel-pickers');
+      container.innerHTML = '';
+      for (const guild of channelData) {
+        const block = document.createElement('div');
+        block.className = 'guild-block';
+        const title = document.createElement('h4');
+        title.textContent = guild.name;
+        block.appendChild(title);
+
+        for (const key of CHANNEL_KEYS) {
+          const chosen = (config && config.settings[key]) || [];
+          const label = document.createElement('label');
+          label.textContent = CHANNEL_LABELS[key];
+          const sel = document.createElement('select');
+          sel.multiple = true;
+          sel.size = 14;
+          sel.dataset.key = key;
+
           const groups = {};
           for (const ch of guild.channels) {
             const cat = ch.category || 'No category';
@@ -480,7 +496,7 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
           }
           for (const cat of Object.keys(groups)) {
             const group = document.createElement('optgroup');
-            group.label = guild.name + ' / ' + cat;
+            group.label = cat;
             for (const ch of groups[cat]) {
               const opt = document.createElement('option');
               opt.value = ch.id;
@@ -490,12 +506,16 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
             }
             sel.appendChild(group);
           }
+          block.appendChild(label);
+          block.appendChild(sel);
         }
+        container.appendChild(block);
       }
     }
 
     function selectedIds(key) {
-      return Array.from(document.getElementById('ch-' + key).selectedOptions).map(o => o.value);
+      return Array.from(document.querySelectorAll('select[data-key="' + key + '"]'))
+        .flatMap(sel => Array.from(sel.selectedOptions).map(o => o.value));
     }
 
     async function saveSettings() {
