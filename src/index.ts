@@ -70,13 +70,15 @@ const FAQ_COMMAND = new SlashCommandBuilder()
   .toJSON();
 
 async function registerCommands(): Promise<void> {
-  const clientId = process.env.CLIENT_ID ?? client.user?.id;
+  // `||`, not `??`: .env files often contain `CLIENT_ID=` (empty string),
+  // which ?? would happily pass straight through to the API.
+  const clientId = process.env.CLIENT_ID || client.user?.id;
   if (!clientId) {
-    console.warn("[faq] CLIENT_ID is not set; skipping slash command registration.");
+    console.warn("[faq] could not determine the application id; skipping slash command registration.");
     return;
   }
 
-  const guildId = process.env.GUILD_ID;
+  const guildId = process.env.GUILD_ID || undefined;
   const route = guildId
     ? Routes.applicationGuildCommands(clientId, guildId)
     : Routes.applicationCommands(clientId);
