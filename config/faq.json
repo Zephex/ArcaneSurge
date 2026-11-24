@@ -8,58 +8,9 @@
   },
   "entries": [
     {
-      "id": "rules",
-      "label": "Server rules",
-      "triggers": ["rules", "server rules", "code of conduct", "guidelines"],
-      "target": {
-        "type": "thread",
-        "channelId": "1538524610604048545",
-        "messageId": "1538525419937079296"
-      },
-      "message": "The full rules are posted in #rules — worth a read before posting.",
-      "color": "#FEE75C"
-    },
-    {
-      "id": "build-guide",
-      "label": "Inquisitor build guide",
-      "triggers": ["mobalytics", "build guide", "inquisitor build", "where is the build", "pob"],
-      "target": { "type": "pin", "channelId": "1536285374840569950", "index": 1 },
-      "message": "The current Inquisitor guide is pinned in #general.",
-      "color": "#5865F2"
-    },
-    {
-      "id": "crafting",
-      "label": "Crafting steps",
-      "triggers": [
-        "crafting",
-        "how do i craft",
-        "crafting steps",
-        "helmet crafting",
-        "craft the helmet",
-        "craftofexile"
-      ],
-      "target": { "type": "pin", "channelId": "1570431915775885412", "index": 0 },
-      "message": "Step-by-step crafting notes are pinned in #crafting-help.",
-      "color": "#57F287"
-    },
-    {
-      "id": "guild-invite",
-      "label": "In-game guild invites",
-      "triggers": [
-        "guild invite",
-        "join the guild",
-        "ingame guild",
-        "in game guild",
-        "guild recruitment"
-      ],
-      "target": { "type": "pin", "channelId": "1571253452267589703", "index": 0 },
-      "message": "Post your character name in #ingame-guild-invites and you'll get an invite to The Chonky Ones.",
-      "color": "#EB459E"
-    },
-    {
       "id": "faq-forum",
       "label": "FAQ forum",
-      "triggers": ["faq", "frequently asked", "where is the faq"],
+      "triggers": ["faq", "frequently asked", "where is the faq", "search first"],
       "target": { "type": "thread", "channelId": "1573828017137127607" },
       "message": "Browse the FAQ forum — check the existing posts first, then open a new one if yours isn't there.",
       "color": "#5865F2"
@@ -67,9 +18,14 @@
     {
       "id": "archdemon-crown",
       "label": "Archdemon Crown crafting",
-      "triggers": ["archdemon", "archdemon crown", "crown crafting"],
+      "triggers": [
+        "archdemon",
+        "archdemon crown",
+        "crown crafting",
+        "archdemon crown crafting"
+      ],
       "target": { "type": "thread", "channelId": "1574183318810009680" },
-      "message": "There's already a troubleshooting post for the Archdemon Crown.",
+      "message": "There's already a troubleshooting post for the Archdemon Crown — add your question there.",
       "color": "#57F287"
     }
   ]
