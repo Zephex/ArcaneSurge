@@ -27,6 +27,39 @@
       "target": { "type": "thread", "channelId": "1574183318810009680" },
       "message": "There's already a troubleshooting post for the Archdemon Crown — add your question there.",
       "color": "#57F287"
+    },
+    {
+      "id": "path-of-building",
+      "label": "Path of Building (PoB)",
+      "triggers": [
+        "path of building",
+        "pob",
+        "pathofbuilding",
+        "how to use pob",
+        "pob code",
+        "share code",
+        "build code"
+      ],
+      "target": { "type": "thread", "channelId": "1573828017137127607" },
+      "message": "Path of Building is the community build planner. Paste your share code with `/pob <code>` and the bot will decode it. More info is in the FAQ forum.",
+      "color": "#5865F2"
+    },
+    {
+      "id": "poe-third-party-tools",
+      "label": "PoE third-party tools",
+      "triggers": [
+        "third party tools",
+        "poe tools",
+        "trade site",
+        "poe ninja",
+        "poeninja",
+        "trade search",
+        "craft of exile",
+        "pob fork"
+      ],
+      "target": { "type": "thread", "channelId": "1573828017137127607" },
+      "message": "Common PoE tools: Path of Building, poe.ninja, the official trade site, craftofexile.com. Check the FAQ forum for setup guides.",
+      "color": "#5865F2"
     }
   ]
 }

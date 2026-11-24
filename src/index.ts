@@ -15,6 +15,7 @@ import {
 import { type FaqConfig, loadConfig } from "./config.js";
 import { type CompiledTrigger, compileTriggers, findMatch } from "./matcher.js";
 import { resolveTarget } from "./targets.js";
+import { decodePobCode, looksLikePobCode, parsePobSummary, type PobSummary } from "./pob.js";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -69,6 +70,19 @@ const FAQ_COMMAND = new SlashCommandBuilder()
   )
   .toJSON();
 
+const POB_COMMAND = new SlashCommandBuilder()
+  .setName("pob")
+  .setDescription("Decode a Path of Building share code and show build info")
+  .addStringOption((option) =>
+    option
+      .setName("code")
+      .setDescription("The PoB share code (paste the long string from PoB's Share button)")
+      .setRequired(true),
+  )
+  .toJSON();
+
+const COMMANDS = [FAQ_COMMAND, POB_COMMAND];
+
 async function registerCommands(): Promise<void> {
   // `||`, not `??`: .env files often contain `CLIENT_ID=` (empty string),
   // which ?? would happily pass straight through to the API.
@@ -83,7 +97,7 @@ async function registerCommands(): Promise<void> {
     ? Routes.applicationGuildCommands(clientId, guildId)
     : Routes.applicationCommands(clientId);
 
-  await new REST().setToken(token).put(route, { body: [FAQ_COMMAND] });
+  await new REST().setToken(token).put(route, { body: COMMANDS });
   console.log(
     `[faq] registered /faq ${
       guildId ? `to guild ${guildId} (appears instantly)` : "globally (may take up to an hour)"
@@ -142,6 +156,20 @@ async function replyWithFaq(
 }
 
 async function handleCommand(interaction: Interaction): Promise<void> {
+  if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.commandName === "faq") {
+    await handleFaqCommand(interaction);
+    return;
+  }
+
+  if (interaction.commandName === "pob") {
+    await handlePobCommand(interaction);
+    return;
+  }
+}
+
+async function handleFaqCommand(interaction: Interaction): Promise<void> {
   if (!interaction.isChatInputCommand() || interaction.commandName !== "faq") return;
 
   // Acknowledge straight away: resolving a pin is a REST call, and Discord
@@ -174,12 +202,104 @@ async function handleCommand(interaction: Interaction): Promise<void> {
   await replyWithFaq(reply, match, interaction.guildId);
 }
 
+async function handlePobCommand(interaction: Interaction): Promise<void> {
+  if (!interaction.isChatInputCommand() || interaction.commandName !== "pob") return;
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const reply: FaqReply = (payload) => interaction.editReply(payload);
+
+  const code = interaction.options.getString("code", true).trim();
+
+  try {
+    const xml = await decodePobCode(code);
+    const summary = parsePobSummary(xml);
+
+    const fields: { name: string; value: string; inline: boolean }[] = [
+      { name: "Game", value: summary.game, inline: true },
+    ];
+    if (summary.level) {
+      fields.push({ name: "Level", value: String(summary.level), inline: true });
+    }
+    if (summary.skills.length > 1) {
+      fields.push({ name: "Skills", value: summary.skills.join(", "), inline: false });
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(toColor(config.settings.embedColor))
+      .setTitle(`${summary.className ?? "Unknown"}${summary.ascendancy ? ` — ${summary.ascendancy}` : ""}`)
+      .setDescription(summary.mainSkill ? `**Main skill:** ${summary.mainSkill}` : "Build decoded successfully")
+      .addFields(fields);
+
+    if (summary.notes) {
+      embed.addFields({ name: "Notes", value: summary.notes.slice(0, 500), inline: false });
+    }
+
+    embed.setFooter({ text: "Decoded from a Path of Building share code" });
+    await reply({ embeds: [embed] });
+  } catch (error) {
+    await reply({
+      content: `❌ Could not decode the PoB code: ${(error as Error).message}\n\n` +
+        "Make sure you copied the full code from PoB's **Share → Copy build code** button. " +
+        "The code is a long string of letters and numbers.",
+    });
+  }
+}
+
+/** Extract a PoB share code from a message, if present. */
+function extractPobCode(text: string): string | null {
+  // PoB codes are typically posted on their own line or after a label
+  const lines = text.split(/\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length >= 50 && looksLikePobCode(trimmed)) {
+      return trimmed;
+    }
+  }
+  // Also check if the whole message is a PoB code
+  const trimmed = text.trim();
+  if (trimmed.length >= 50 && looksLikePobCode(trimmed)) {
+    return trimmed;
+  }
+  return null;
+}
+
+async function handlePobCodeInMessage(message: Message, code: string): Promise<void> {
+  try {
+    const xml = await decodePobCode(code);
+    const summary = parsePobSummary(xml);
+
+    const embed = new EmbedBuilder()
+      .setColor(toColor(config.settings.embedColor))
+      .setTitle(`${summary.className ?? "PoE Build"}${summary.ascendancy ? ` — ${summary.ascendancy}` : ""}`)
+      .setDescription(summary.mainSkill ? `**Main skill:** ${summary.mainSkill}` : "Build decoded")
+      .addFields(
+        { name: "Game", value: summary.game, inline: true },
+        ...(summary.level ? [{ name: "Level", value: String(summary.level), inline: true }] : []),
+        ...(summary.skills.length > 1
+          ? [{ name: "Skills", value: summary.skills.slice(0, 5).join(", "), inline: false }]
+          : []),
+      )
+      .setFooter({ text: "Auto-detected from a Path of Building share code" });
+
+    await message.reply({ embeds: [embed], allowedMentions: { repliedUser: false } });
+  } catch {
+    // Not a valid PoB code — ignore silently
+  }
+}
+
 async function handleMessage(message: Message): Promise<void> {
   if (!message.guild || !message.content) return;
   if (config.settings.ignoreBots && message.author.bot) return;
 
   const allowlist = config.settings.channelAllowlist;
   if (allowlist.length > 0 && !allowlist.includes(message.channelId)) return;
+
+  // Check for PoB codes in the message
+  const pobCode = extractPobCode(message.content);
+  if (pobCode) {
+    await handlePobCodeInMessage(message, pobCode);
+    return;
+  }
 
   const match = findMatch(triggers, message.content);
   if (!match) return;
@@ -206,6 +326,9 @@ client.once(Events.ClientReady, (ready) => {
           : "off (listening everywhere)"
       }`,
   );
+
+  // Set the bot's presence/activity
+  client.user?.setActivity("Arcane Surge FF combo is Cheap");
 
   void registerCommands().catch((error) => {
     console.error("[faq] failed to register slash commands:", error);

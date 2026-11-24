@@ -139,7 +139,48 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`);
+  console.log("\nPath of Building decoder");
+  {
+    await check("rejects empty input", async () => {
+      const { decodePobCode } = await import("./pob.js");
+      await assert.rejects(() => decodePobCode(""), /Could not decode/i);
+    });
+
+    await check("rejects non-PoB data", async () => {
+      const { decodePobCode } = await import("./pob.js");
+      await assert.rejects(() => decodePobCode("eJzLSM3JyVcozy/KSQEAGgsEXQ=="), /does not look like/i);
+    });
+
+    await check("looksLikePobCode accepts a real PoB code", async () => {
+      const { looksLikePobCode } = await import("./pob.js");
+      const code = "eNrtfWt32ki29ufhV-h4Vp-VLGPQXeCTzBwM2CbxhRhsJ_kwWTIUoFhIRBK26bPy_vZ3710lIYG4Oelu90zPWpPGUl335dmXKlW9";
+      assert.ok(looksLikePobCode(code));
+    });
+
+    await check("looksLikePobCode rejects short text", async () => {
+      const { looksLikePobCode } = await import("./pob.js");
+      assert.ok(!looksLikePobCode("hello world"));
+    });
+
+    // Test with a real PoB code if available
+    const fs = await import("node:fs");
+    const testCodePath = "/tmp/opencode/test_pob_code.txt";
+    if (fs.existsSync(testCodePath)) {
+      await check("decodes a real PoB2 code", async () => {
+        const { decodePobCode, parsePobSummary } = await import("./pob.js");
+        const code = fs.readFileSync(testCodePath, "utf8").trim();
+        const xml = await decodePobCode(code);
+        assert.ok(xml.includes("<PathOfBuilding2"));
+        const summary = parsePobSummary(xml);
+        assert.equal(summary.game, "PoE 2");
+        assert.equal(summary.className, "Witch");
+        assert.ok(summary.level === 93);
+        assert.ok(summary.mainSkill !== undefined);
+      });
+    }
+  }
+
+  console.log(`\\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exitCode = 1;
 }
 
