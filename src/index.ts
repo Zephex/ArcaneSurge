@@ -16,8 +16,8 @@ import { type FaqConfig, loadConfig } from "./config.js";
 import { type CompiledTrigger, compileTriggers, findMatch } from "./matcher.js";
 import { watch } from "node:fs";
 import { resolveTarget } from "./targets.js";
-import { decodePobCode, looksLikePobCode, parsePobSummary, type PobSummary, uploadToPobbin } from "./pob.js";
-import { extractPoeLinks, fetchPobCodeFromUrl, linkTypeName, type PoeLink } from "./poeLinks.js";
+import { decodePobCode, looksLikePobCode, uploadToPobbin } from "./pob.js";
+import { extractPoeLinks, fetchPobCodeFromUrl, type PoeLink } from "./poeLinks.js";
 import "./admin.js"; // Start admin web interface
 
 function requireEnv(name: string): string {
@@ -227,76 +227,20 @@ async function handlePobCommand(interaction: Interaction): Promise<void> {
   const code = interaction.options.getString("code", true).trim();
 
   try {
-    const xml = await decodePobCode(code);
-    const summary = parsePobSummary(xml);
-
-    const fields: { name: string; value: string; inline: boolean }[] = [
-      { name: "Game", value: summary.game, inline: true },
-    ];
-    if (summary.level) {
-      fields.push({ name: "Level", value: String(summary.level), inline: true });
-    }
-    if (summary.ascendancy && summary.ascendancy !== "None") {
-      // Already in title
-    }
-    if (summary.stats.life) {
-      fields.push({ name: "Life", value: String(summary.stats.life), inline: true });
-    }
-    if (summary.stats.energyShield) {
-      fields.push({ name: "ES", value: String(summary.stats.energyShield), inline: true });
-    }
-    if (summary.stats.mana) {
-      fields.push({ name: "Mana", value: String(summary.stats.mana), inline: true });
-    }
-    if (summary.stats.dps) {
-      fields.push({ name: "DPS", value: String(summary.stats.dps), inline: true });
-    }
-    if (summary.stats.fireRes !== undefined || summary.stats.coldRes !== undefined || summary.stats.lightningRes !== undefined || summary.stats.chaosRes !== undefined) {
-      const res = [
-        summary.stats.fireRes !== undefined ? `F:${summary.stats.fireRes}%` : "",
-        summary.stats.coldRes !== undefined ? `C:${summary.stats.coldRes}%` : "",
-        summary.stats.lightningRes !== undefined ? `L:${summary.stats.lightningRes}%` : "",
-        summary.stats.chaosRes !== undefined ? `Ch:${summary.stats.chaosRes}%` : "",
-      ].filter(Boolean).join(" ");
-      if (res) fields.push({ name: "Resistances", value: res, inline: false });
-    }
-    if (summary.skills.length > 1) {
-      fields.push({ name: "Skills", value: summary.skills.join(", "), inline: false });
-    }
-    if (summary.items.length > 0) {
-      const gear = summary.items.map((i) => `${i.slot}: ${i.name} (${i.rarity})`).join("\\n");
-      fields.push({ name: "Gear", value: gear.slice(0, 1024), inline: false });
-    }
-    if (summary.passivePoints) {
-      fields.push({ name: "Passive Points", value: String(summary.passivePoints), inline: true });
-    }
-
-    const embed = new EmbedBuilder()
-      .setColor(toColor(config.settings.embedColor))
-      .setTitle(`${summary.className ?? "Unknown"}${summary.ascendancy ? ` — ${summary.ascendancy}` : ""}`)
-      .setDescription(summary.mainSkill ? `**Main skill:** ${summary.mainSkill}` : "Build decoded successfully")
-      .addFields(fields);
-
-    if (summary.notes) {
-      embed.addFields({ name: "Notes", value: summary.notes.slice(0, 500), inline: false });
-    }
-
-    const pobbinUrl = await uploadToPobbin(code);
-    if (pobbinUrl) {
-      embed.setURL(pobbinUrl);
-      embed.addFields({ name: "pobb.in", value: pobbinUrl, inline: false });
-    }
-
-    embed.setFooter({ text: "Decoded from a Path of Building share code" });
-    await reply({ embeds: [embed] });
+    // Validate the code before uploading it
+    await decodePobCode(code);
   } catch (error) {
-    await reply({
-      content: `❌ Could not decode the PoB code: ${(error as Error).message}\n\n` +
-        "Make sure you copied the full code from PoB's **Share → Copy build code** button. " +
-        "The code is a long string of letters and numbers.\n\n" +
-        "💡 If the code is too long for this command, just paste it as a regular message or attach it as a .txt file — the bot will auto-detect it.",
-    });
+    await reply({ content: `❌ That isn't a valid PoB code: ${(error as Error).message}` });
+    return;
   }
+
+  const url = await uploadToPobbin(code);
+  if (!url) {
+    await reply({ content: "❌ Could not upload the build to pobb.in. Please try again." });
+    return;
+  }
+
+  await reply({ content: url });
 }
 
 /** Extract a PoB share code from a message, if present. */
@@ -319,60 +263,12 @@ function extractPobCode(text: string): string | null {
 
 async function handlePoeLinksInMessage(message: Message, links: PoeLink[]): Promise<void> {
   for (const link of links) {
-    // Try to fetch and decode a PoB code from the link
     const fetched = await fetchPobCodeFromUrl(link);
-    if (fetched) {
-      try {
-        const summary = parsePobSummary(fetched.xml);
-        const embed = new EmbedBuilder()
-          .setColor(toColor(config.settings.embedColor))
-          .setTitle(`${summary.className ?? "PoE Build"}${summary.ascendancy ? ` — ${summary.ascendancy}` : ""}`)
-          .setDescription(summary.mainSkill ? `**Main skill:** ${summary.mainSkill}` : "Build decoded")
-          .addFields(
-            { name: "Game", value: summary.game, inline: true },
-            ...(summary.level ? [{ name: "Level", value: String(summary.level), inline: true }] : []),
-            ...(summary.skills.length > 1
-              ? [{ name: "Skills", value: summary.skills.slice(0, 5).join(", "), inline: false }]
-              : []),
-          )
-          .setFooter({ text: `Decoded from ${linkTypeName(link.type)} link` });
+    if (!fetched) continue; // Stay silent for links we can't turn into a code
 
-        if (summary.notes) {
-          embed.addFields({ name: "Notes", value: summary.notes.slice(0, 300), inline: false });
-        }
-
-        const pobbinUrl = await uploadToPobbin(fetched.code);
-        if (pobbinUrl) {
-          embed.setURL(pobbinUrl);
-          embed.addFields({ name: "pobb.in", value: pobbinUrl, inline: false });
-        }
-
-        await message.reply({ embeds: [embed], allowedMentions: { repliedUser: false } });
-        return;
-      } catch {
-        // Fall through to helpful message
-      }
-    }
-
-    // If we couldn't decode, respond with a helpful message for known sites
-    const name = linkTypeName(link.type);
-    let helpText = "";
-    switch (link.type) {
-      case "maxroll":
-        helpText = "Maxroll build guides contain PoB codes. To decode, copy the PoB code from the guide and paste it here, or use `/pob <code>`.";
-        break;
-      case "pob.codes":
-        helpText = "pob.codes is a PoB viewer. To decode the build, copy the PoB share code from pob.codes and paste it here, or use `/pob <code>`.";
-        break;
-      case "poe.ninja":
-        helpText = "poe.ninja shows builds but doesn't expose raw PoB codes directly. You can usually find the PoB code on the build's page or ask the author.";
-        break;
-      default:
-        helpText = `I detected a ${name} link but couldn't extract a PoB code from it. Try pasting the raw PoB code directly.`;
-    }
-
-    if (helpText) {
-      await message.reply({ content: helpText, allowedMentions: { repliedUser: false } });
+    const url = await uploadToPobbin(fetched.code);
+    if (url) {
+      await message.reply({ content: url, allowedMentions: { repliedUser: false } });
       return;
     }
   }
@@ -380,37 +276,15 @@ async function handlePoeLinksInMessage(message: Message, links: PoeLink[]): Prom
 
 async function handlePobCodeInMessage(message: Message, code: string): Promise<void> {
   try {
-    const xml = await decodePobCode(code);
-    const summary = parsePobSummary(xml);
-
-    const embed = new EmbedBuilder()
-      .setColor(toColor(config.settings.embedColor))
-      .setTitle(`${summary.className ?? "PoE Build"}${summary.ascendancy ? ` — ${summary.ascendancy}` : ""}`)
-      .setDescription(summary.mainSkill ? `**Main skill:** ${summary.mainSkill}` : "Build decoded")
-      .addFields(
-        { name: "Game", value: summary.game, inline: true },
-        ...(summary.level ? [{ name: "Level", value: String(summary.level), inline: true }] : []),
-        ...(summary.stats.life ? [{ name: "Life", value: String(summary.stats.life), inline: true }] : []),
-        ...(summary.stats.energyShield ? [{ name: "ES", value: String(summary.stats.energyShield), inline: true }] : []),
-        ...(summary.stats.dps ? [{ name: "DPS", value: String(summary.stats.dps), inline: true }] : []),
-        ...(summary.skills.length > 1
-          ? [{ name: "Skills", value: summary.skills.slice(0, 5).join(", "), inline: false }]
-          : []),
-        ...(summary.items.length > 0
-          ? [{ name: "Gear", value: summary.items.slice(0, 6).map((i) => `${i.slot}: ${i.name}`).join("\\n"), inline: false }]
-          : []),
-      )
-      .setFooter({ text: "Auto-detected from a Path of Building share code" });
-
-    const pobbinUrl = await uploadToPobbin(code);
-    if (pobbinUrl) {
-      embed.setURL(pobbinUrl);
-      embed.addFields({ name: "pobb.in", value: pobbinUrl, inline: false });
-    }
-
-    await message.reply({ embeds: [embed], allowedMentions: { repliedUser: false } });
+    // Validate before uploading so random base64 isn't sent to pobb.in
+    await decodePobCode(code);
   } catch {
-    // Not a valid PoB code — ignore silently
+    return; // Not a valid PoB code — ignore silently
+  }
+
+  const url = await uploadToPobbin(code);
+  if (url) {
+    await message.reply({ content: url, allowedMentions: { repliedUser: false } });
   }
 }
 
