@@ -18,6 +18,7 @@ import { watch } from "node:fs";
 import { resolveTarget } from "./targets.js";
 import { decodePobCode, looksLikePobCode, uploadToPobbin } from "./pob.js";
 import { extractPoeLinks, fetchPobCodeFromUrl, type PoeLink } from "./poeLinks.js";
+import { parseBuildFile } from "./buildFile.js";
 import "./admin.js"; // Start admin web interface
 
 function requireEnv(name: string): string {
@@ -288,12 +289,11 @@ async function handlePobCodeInMessage(message: Message, code: string): Promise<v
   }
 }
 
-/** Check message attachments for PoB codes (Discord converts long pastes to .txt files). */
+/** Check attachments: .txt/.pob hold PoB codes, .build holds GGG build JSON. */
 async function extractPobCodeFromAttachments(message: Message): Promise<string | null> {
   if (!message.attachments || message.attachments.size === 0) return null;
 
   for (const attachment of message.attachments.values()) {
-    // Only check text files
     const name = attachment.name?.toLowerCase() ?? "";
     if (!name.endsWith(".txt") && !name.endsWith(".pob") && !attachment.contentType?.startsWith("text/")) {
       continue;
@@ -315,6 +315,32 @@ async function extractPobCodeFromAttachments(message: Message): Promise<string |
   return null;
 }
 
+async function handleBuildFile(message: Message, attachment: { url: string }): Promise<void> {
+  try {
+    const response = await fetch(attachment.url);
+    if (!response.ok) return;
+    const summary = parseBuildFile(await response.text());
+    if (!summary) return; // Not a GGG build file — stay silent
+
+    const lines = [];
+    if (summary.name) lines.push(`**${summary.name}**`);
+    const identity = [summary.ascendancy, summary.characterClass].filter(Boolean).join(" — ");
+    if (identity) lines.push(identity);
+    if (summary.level !== undefined) lines.push(`Level ${summary.level}`);
+    if (summary.passiveCount > 0) lines.push(`${summary.passiveCount} passive points`);
+    if (summary.skills.length > 0) lines.push(`Skills: ${summary.skills.join(", ")}`);
+    if (summary.items.length > 0) lines.push(`Gear: ${summary.items.join(", ")}`);
+
+    if (lines.length === 0) return;
+    await message.reply({
+      content: lines.join("\n"),
+      allowedMentions: { repliedUser: false },
+    });
+  } catch {
+    // Ignore fetch/parse failures
+  }
+}
+
 async function handleMessage(message: Message): Promise<void> {
   if (!message.guild) return;
   if (config.settings.ignoreBots && message.author.bot) return;
@@ -323,6 +349,14 @@ async function handleMessage(message: Message): Promise<void> {
   const inChannel = (list: string[]) => list.length === 0 || list.includes(message.channelId);
 
   if (features.pobCodes && inChannel(config.settings.codeChannels)) {
+    // .build attachments (GGG Build Planner JSON)
+    for (const attachment of message.attachments.values()) {
+      if (attachment.name?.toLowerCase().endsWith(".build")) {
+        await handleBuildFile(message, attachment);
+        return;
+      }
+    }
+
     const pobCodeFromAttachment = await extractPobCodeFromAttachments(message);
     if (pobCodeFromAttachment) {
       await handlePobCodeInMessage(message, pobCodeFromAttachment);
