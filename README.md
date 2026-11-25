@@ -185,31 +185,29 @@ Required env vars:
 - `CLIENT_SECRET` — Discord OAuth2 client secret (Developer Portal → OAuth2 → Reset Secret)
 - `ADMIN_CALLBACK_URL` — OAuth2 callback URL (default: `http://localhost:3001/auth/callback`)
 
-### Hosting on bot.zephex.dk
+### Hosting on your domain
 
-1. **DNS**: Point `bot.zephex.dk` A record to your server IP
+1. **DNS**: Point your domain's A record to your server IP
 
-2. **Add Caddy config**: Add this block to `/etc/caddy/Caddyfile`:
+2. **Add reverse proxy config**: Add this block to your Caddyfile (or nginx config):
 
 ```
-bot.zephex.dk {
+bot.your-domain.com {
     reverse_proxy 127.0.0.1:3001
 }
 ```
 
-3. **Reload Caddy**: `sudo caddy reload --config /etc/caddy/Caddyfile` or `sudo systemctl restart caddy`
+3. **Reload your reverse proxy**: `sudo caddy reload --config /etc/caddy/Caddyfile` or `sudo systemctl restart caddy`
 
 4. **Set env vars**:
 ```env
 ADMIN_PORT=3001
-ADMIN_CALLBACK_URL=https://bot.zephex.dk/auth/callback
+ADMIN_CALLBACK_URL=https://bot.your-domain.com/auth/callback
 ```
 
-5. **Discord OAuth redirect**: Add `https://bot.zephex.dk/auth/callback` to Developer Portal → OAuth2 → Redirects
+5. **Discord OAuth redirect**: Add `https://bot.your-domain.com/auth/callback` to Developer Portal → OAuth2 → Redirects
 
-6. **Access**: https://bot.zephex.dk/login
-
-The admin interface is currently accessible at http://85.190.126.152:3001 (port 3001 is open).
+6. **Access**: https://bot.your-domain.com/login
 
 ## Layout
 
