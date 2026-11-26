@@ -125,5 +125,15 @@
       "message": "Common PoE tools: Path of Building, poe.ninja, the official trade site, craftofexile.com. Check the FAQ forum for setup guides.",
       "color": "#5865F2"
     }
+  ],
+  "reactionPosts": [
+    {
+      "messageId": "1575314709727547526",
+      "channelId": "1575310483681054871",
+      "guildId": "1536285372928233602",
+      "roles": {
+        "🎮": "1537578842565115914"
+      }
+    }
   ]
 }

@@ -57,6 +57,8 @@ export interface ReactionRolePost {
   messageId: string;
   channelId: string;
   guildId: string;
+  /** The message text, stored so it can be edited later. */
+  content?: string;
   /** Emoji (Unicode or custom <:name:id>) -> role ID. */
   roles: Record<string, string>;
 }
@@ -169,7 +171,14 @@ function validateReactionPosts(raw: unknown): ReactionRolePost[] {
       if (!isSnowflake(roleId)) fail(`${where}.roles[${emoji}]`, "expected a role ID");
       roles[emoji] = roleId;
     }
-    return { messageId: post.messageId, channelId: post.channelId, guildId: post.guildId, roles };
+    const content = typeof post.content === "string" ? post.content : undefined;
+    return {
+      messageId: post.messageId,
+      channelId: post.channelId,
+      guildId: post.guildId,
+      ...(content !== undefined ? { content } : {}),
+      roles,
+    };
   });
 }
 

@@ -299,7 +299,7 @@ app.post("/api/posts", async (req, res) => {
     const config = await loadConfig(CONFIG_PATH);
     config.reactionPosts = [
       ...(config.reactionPosts ?? []).filter((p) => p.messageId !== message.id),
-      { messageId: message.id, channelId, guildId, roles },
+      { messageId: message.id, channelId, guildId, content, roles },
     ];
     writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", "utf8");
 
@@ -308,6 +308,33 @@ app.post("/api/posts", async (req, res) => {
       messageId: message.id,
       url: `https://discord.com/channels/${guildId}/${channelId}/${message.id}`,
     });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// API: Edit a bot message and update its stored content
+app.patch("/api/posts/:messageId", async (req, res) => {
+  try {
+    const { content } = req.body as { content?: string };
+    if (!content?.trim()) {
+      res.status(400).json({ error: "content is required" });
+      return;
+    }
+
+    const config = await loadConfig(CONFIG_PATH);
+    const post = (config.reactionPosts ?? []).find((p) => p.messageId === req.params.messageId);
+    if (!post) {
+      res.status(404).json({ error: "Post not found in config" });
+      return;
+    }
+
+    const rest = new REST().setToken(process.env.DISCORD_TOKEN as string);
+    await rest.patch(Routes.channelMessage(post.channelId, post.messageId), { body: { content } });
+
+    post.content = content;
+    writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", "utf8");
+    res.json({ ok: true, message: "Message edited." });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
@@ -794,10 +821,38 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
       container.innerHTML = posts.map(p => \`
         <div class="entry">
           <a href="https://discord.com/channels/\${p.guildId}/\${p.channelId}/\${p.messageId}" target="_blank">Jump to message</a>
+          <div><small>\${p.content ? escapeHtml(p.content.slice(0,120)) : '(no stored text)'}</small></div>
           <div><small>\${Object.entries(p.roles).map(([e,r]) => e + ' → ' + r).join(', ')}</small></div>
+          <div id="edit-\${p.messageId}" style="display:none;margin:8px 0">
+            <textarea id="editText-\${p.messageId}">\${p.content ? escapeHtml(p.content) : ''}</textarea>
+            <button class="btn" onclick="savePost('\${p.messageId}')">Save edit</button>
+            <button class="btn" onclick="document.getElementById('edit-\${p.messageId}').style.display='none'">Cancel</button>
+          </div>
+          <button class="btn" onclick="document.getElementById('edit-\${p.messageId}').style.display='block'">✏️ Edit message</button>
           <button class="btn btn-danger" onclick="deletePost('\${p.messageId}')">Remove config</button>
         </div>
       \`).join('');
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    async function savePost(messageId) {
+      const content = document.getElementById('editText-' + messageId).value;
+      const res = await fetch('/api/posts/' + messageId, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        await loadConfig();
+        renderPostList();
+        loadRawConfig();
+      } else {
+        alert('Error: ' + (data.error || 'Unknown error'));
+      }
     }
 
     async function deletePost(messageId) {
