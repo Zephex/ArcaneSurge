@@ -11,6 +11,8 @@ import {
   SlashCommandBuilder,
   type Interaction,
   type Message,
+  type MessageReaction,
+  type User,
 } from "discord.js";
 import { type FaqConfig, loadConfig } from "./config.js";
 import { type CompiledTrigger, compileTriggers, findMatch } from "./matcher.js";
@@ -38,9 +40,10 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessageReactions,
     GatewayIntentBits.MessageContent,
   ],
-  partials: [Partials.Channel],
+  partials: [Partials.Channel, Partials.Message, Partials.Reaction],
 });
 
 // Assigned during startup, before the gateway connects, so every handler below
@@ -432,6 +435,72 @@ client.once(Events.ClientReady, (ready) => {
 
   void registerCommands().catch((error) => {
     console.error("[faq] failed to register slash commands:", error);
+  });
+});
+
+/** Apply or remove a role when someone reacts to a bot-created reaction-role post. */
+async function handleReaction(
+  reaction: MessageReaction | { partial: true; fetch(): Promise<MessageReaction>; emoji: { id: string | null; name: string | null }; message: unknown },
+  user: User | { id: string; tag?: string | null; bot?: boolean | null },
+  action: "add" | "remove",
+): Promise<void> {
+  if (user.bot) return;
+  let fullReaction: MessageReaction;
+  if (reaction.partial) {
+    try { fullReaction = await reaction.fetch(); } catch { return; }
+  } else {
+    fullReaction = reaction as MessageReaction;
+  }
+
+  const message = fullReaction.message;
+  if (message.partial) {
+    try { await message.fetch(); } catch { return; }
+  }
+  if (!message.guild) return;
+
+  const post = (config.reactionPosts ?? []).find((p) => p.messageId === message.id);
+  if (!post) return;
+
+  const emojiKey = fullReaction.emoji.id
+    ? `<:${fullReaction.emoji.name}:${fullReaction.emoji.id}>`
+    : fullReaction.emoji.name;
+  if (!emojiKey) return;
+  const roleId = post.roles[emojiKey];
+  if (!roleId) return;
+
+  let member;
+  try {
+    member = await message.guild.members.fetch(user.id);
+  } catch {
+    return;
+  }
+
+  const role = message.guild.roles.cache.get(roleId);
+  if (!role) {
+    console.error(`[faq] reaction role ${roleId} not found in guild ${message.guild.id}`);
+    return;
+  }
+
+  try {
+    if (action === "add") {
+      await member.roles.add(role, "Reaction role");
+    } else {
+      await member.roles.remove(role, "Reaction role removed");
+    }
+  } catch (error) {
+    console.error(`[faq] failed to ${action} role ${role.name} for ${user.tag}:`, (error as Error).message);
+  }
+}
+
+client.on(Events.MessageReactionAdd, (reaction, user) => {
+  void handleReaction(reaction, user, "add").catch((error) => {
+    console.error("[faq] error handling reaction add:", error);
+  });
+});
+
+client.on(Events.MessageReactionRemove, (reaction, user) => {
+  void handleReaction(reaction, user, "remove").catch((error) => {
+    console.error("[faq] error handling reaction remove:", error);
   });
 });
 

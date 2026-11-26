@@ -258,6 +258,73 @@ app.get("/api/status", async (_req, res) => {
   }
 });
 
+// API: List roles in a guild (for reaction-role posts)
+app.get("/api/guilds/:guildId/roles", async (req, res) => {
+  try {
+    const rest = new REST().setToken(process.env.DISCORD_TOKEN as string);
+    const roles = (await rest.get(Routes.guildRoles(req.params.guildId))) as Array<{
+      id: string; name: string; color: number; position: number; managed: boolean;
+    }>;
+    res.json(roles.filter((r) => !r.managed && r.name !== "@everyone"));
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// API: Create a reaction-role post (bot sends the message, then adds reactions)
+app.post("/api/posts", async (req, res) => {
+  try {
+    const { channelId, guildId, content, roles } = req.body as {
+      channelId: string; guildId: string; content: string; roles: Record<string, string>;
+    };
+    if (!channelId || !guildId || !content?.trim()) {
+      res.status(400).json({ error: "channelId, guildId and content are required" });
+      return;
+    }
+    if (!roles || Object.keys(roles).length === 0) {
+      res.status(400).json({ error: "At least one emoji -> role mapping is required" });
+      return;
+    }
+
+    const rest = new REST().setToken(process.env.DISCORD_TOKEN as string);
+    // Discord API emoji values must be URL-encoded for the reaction endpoint
+    const message = (await rest.post(Routes.channelMessages(channelId), {
+      body: { content },
+    })) as { id: string };
+
+    for (const emoji of Object.keys(roles)) {
+      await rest.put(Routes.channelMessageOwnReaction(channelId, message.id, emoji));
+    }
+
+    const config = await loadConfig(CONFIG_PATH);
+    config.reactionPosts = [
+      ...(config.reactionPosts ?? []).filter((p) => p.messageId !== message.id),
+      { messageId: message.id, channelId, guildId, roles },
+    ];
+    writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", "utf8");
+
+    res.json({
+      ok: true,
+      messageId: message.id,
+      url: `https://discord.com/channels/${guildId}/${channelId}/${message.id}`,
+    });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// API: Delete a reaction-role post config
+app.delete("/api/posts/:messageId", async (req, res) => {
+  try {
+    const config = await loadConfig(CONFIG_PATH);
+    config.reactionPosts = (config.reactionPosts ?? []).filter((p) => p.messageId !== req.params.messageId);
+    writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", "utf8");
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
 // API: Get raw config file
 app.get("/api/config/raw", (_req, res) => {
   try {
@@ -431,6 +498,24 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
       <button class="btn" onclick="addEntry()">+ Add Entry</button>
       <button class="btn" onclick="saveEntries()">Save Entries</button>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>Reaction Role Posts</h2>
+    <p class="hint">The bot posts a message in a channel, adds the reactions, and gives the matching role to anyone who reacts.</p>
+    <label>Server</label>
+    <select id="postGuild" onchange="loadPostRoles()"></select>
+    <label>Channel</label>
+    <select id="postChannel"></select>
+    <label>Message text</label>
+    <textarea id="postContent" placeholder="React below to get your role!"></textarea>
+    <h3>Emoji → Role</h3>
+    <div id="postRoles"></div>
+    <button class="btn" onclick="addPostRole()">+ Add reaction</button>
+    <button class="btn" onclick="createPost()">📢 Post as bot</button>
+
+    <h3>Existing posts</h3>
+    <div id="postList"></div>
   </div>
 
   <div class="card">
@@ -626,13 +711,113 @@ function getDashboardHtml(session: { username: string; avatar: string | null; us
       buildChannelSelects();
     }
 
+    let postRoles = [];
+    let guildRoles = [];
+
+    async function initPostUi() {
+      const guildSel = document.getElementById('postGuild');
+      guildSel.innerHTML = channelData.map(g => \`<option value="\${g.id}">\${g.name}</option>\`).join('');
+      document.getElementById('postGuild').addEventListener('change', () => { updatePostChannels(); loadPostRoles(); });
+      updatePostChannels();
+      await loadPostRoles();
+      renderPostList();
+      addPostRole();
+    }
+
+    function updatePostChannels() {
+      const guildId = document.getElementById('postGuild').value;
+      const guild = channelData.find(g => g.id === guildId);
+      document.getElementById('postChannel').innerHTML = (guild ? guild.channels : [])
+        .map(c => \`<option value="\${c.id}">#\${c.name}</option>\`).join('');
+    }
+
+    async function loadPostRoles() {
+      const guildId = document.getElementById('postGuild').value;
+      if (!guildId) return;
+      const res = await fetch('/api/guilds/' + guildId + '/roles');
+      guildRoles = await res.json();
+      renderPostRoles();
+    }
+
+    function renderPostRoles() {
+      const container = document.getElementById('postRoles');
+      container.innerHTML = postRoles.map((r, i) => \`
+        <div style="display:flex;gap:8px;margin:6px 0;align-items:center">
+          <input type="text" placeholder="Emoji (e.g. 🔥)" value="\${r.emoji}" onchange="postRoles[\${i}].emoji=this.value" style="width:80px">
+          <select onchange="postRoles[\${i}].roleId=this.value">
+            <option value="">— select role —</option>
+            \${guildRoles.map(role => \`<option value="\${role.id}" \${role.id===r.roleId?'selected':''}>\${role.name}</option>\`).join('')}
+          </select>
+          <button class="btn btn-danger" onclick="postRoles.splice(\${i},1);renderPostRoles()">✕</button>
+        </div>
+      \`).join('');
+    }
+
+    function addPostRole() {
+      postRoles.push({ emoji: '', roleId: '' });
+      renderPostRoles();
+    }
+
+    async function createPost() {
+      const pairs = postRoles.filter(r => r.emoji.trim() && r.roleId);
+      if (pairs.length === 0) { alert('Add at least one emoji and role.'); return; }
+      const roles = {};
+      for (const p of pairs) roles[p.emoji.trim()] = p.roleId;
+
+      const res = await fetch('/api/posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          guildId: document.getElementById('postGuild').value,
+          channelId: document.getElementById('postChannel').value,
+          content: document.getElementById('postContent').value,
+          roles,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        alert('Posted! Users who react will get the roles.');
+        document.getElementById('postContent').value = '';
+        postRoles = [];
+        renderPostRoles();
+        renderPostList();
+        loadRawConfig();
+      } else {
+        alert('Error: ' + (data.error || 'Unknown error'));
+      }
+    }
+
+    async function renderPostList() {
+      const container = document.getElementById('postList');
+      const posts = (config && config.reactionPosts) || [];
+      if (posts.length === 0) { container.innerHTML = '<p class="hint">No reaction-role posts yet.</p>'; return; }
+      container.innerHTML = posts.map(p => \`
+        <div class="entry">
+          <a href="https://discord.com/channels/\${p.guildId}/\${p.channelId}/\${p.messageId}" target="_blank">Jump to message</a>
+          <div><small>\${Object.entries(p.roles).map(([e,r]) => e + ' → ' + r).join(', ')}</small></div>
+          <button class="btn btn-danger" onclick="deletePost('\${p.messageId}')">Remove config</button>
+        </div>
+      \`).join('');
+    }
+
+    async function deletePost(messageId) {
+      if (!confirm('Remove this reaction-role config? The message stays in Discord.')) return;
+      const res = await fetch('/api/posts/' + messageId, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.ok) {
+        await loadConfig();
+        renderPostList();
+        loadRawConfig();
+      }
+    }
+
     async function loadRawConfig() {
       const res = await fetch('/api/config/raw');
       const text = await res.text();
       document.getElementById('rawConfig').value = text;
     }
 
-    loadConfig().then(loadStatus);
+    loadConfig().then(() => loadStatus()).then(initPostUi);
   </script>
 </body>
 </html>`;

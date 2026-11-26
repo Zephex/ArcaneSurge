@@ -52,9 +52,19 @@ export interface Features {
   commands: boolean;
 }
 
+export interface ReactionRolePost {
+  /** Discord message ID of the bot's post. */
+  messageId: string;
+  channelId: string;
+  guildId: string;
+  /** Emoji (Unicode or custom <:name:id>) -> role ID. */
+  roles: Record<string, string>;
+}
+
 export interface FaqConfig {
   settings: Settings;
   entries: Entry[];
+  reactionPosts?: ReactionRolePost[];
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -139,6 +149,28 @@ function validateTarget(raw: unknown, where: string): Target {
     `${where}.type`,
     `expected "pin", "thread" or "url" (got ${JSON.stringify(type)})`,
   );
+}
+
+function validateReactionPosts(raw: unknown): ReactionRolePost[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) fail("config.reactionPosts", "expected an array");
+  return raw.map((value, index) => {
+    const where = `reactionPosts[${index}]`;
+    const post = asObject(value, where);
+    if (!isSnowflake(post.messageId)) fail(`${where}.messageId`, "expected a message ID");
+    if (!isSnowflake(post.channelId)) fail(`${where}.channelId`, "expected a channel ID");
+    if (!isSnowflake(post.guildId)) fail(`${where}.guildId`, "expected a guild ID");
+    if (post.roles === null || typeof post.roles !== "object" || Array.isArray(post.roles)) {
+      fail(`${where}.roles`, "expected an object mapping emoji to role ID");
+    }
+    const roles: Record<string, string> = {};
+    for (const [emoji, roleId] of Object.entries(post.roles as Record<string, unknown>)) {
+      if (!emoji) fail(`${where}.roles`, "empty emoji key");
+      if (!isSnowflake(roleId)) fail(`${where}.roles[${emoji}]`, "expected a role ID");
+      roles[emoji] = roleId;
+    }
+    return { messageId: post.messageId, channelId: post.channelId, guildId: post.guildId, roles };
+  });
 }
 
 function validateEntry(raw: unknown, index: number): Entry {
@@ -292,5 +324,9 @@ export async function loadConfig(
     seen.add(entry.id);
   }
 
-  return { settings: validateSettings(root.settings), entries };
+  return {
+    settings: validateSettings(root.settings),
+    entries,
+    reactionPosts: validateReactionPosts(root.reactionPosts),
+  };
 }
